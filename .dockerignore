@@ -1,0 +1,14 @@
+node_modules
+**/node_modules
+**/dist
+.git
+.github
+.env
+.env.*
+.config-dev
+*.log
+*.sqlite
+*.sqlite-*
+.vscode
+.idea
+README.md

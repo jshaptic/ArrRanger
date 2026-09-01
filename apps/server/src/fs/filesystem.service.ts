@@ -1,0 +1,581 @@
+import { mkdir, readdir, rename, rm, rmdir, stat } from 'node:fs/promises';
+import path from 'node:path';
+import type {
+  FsCheck,
+  FsEntry,
+  FsListResponse,
+  FsMeasurement,
+  FsOp,
+  FsPreflight,
+  FsRoot,
+  FsRootsResponse,
+  QueuePayloadFor,
+} from '@arrranger/shared';
+import { FsError } from '../lib/errors.js';
+import {
+  ACCESS_READ,
+  ACCESS_WRITE,
+  canAccess,
+  describePath,
+  freeSpaceAt,
+  isMountPoint,
+  PathGuard,
+  type PathStats,
+} from './paths.js';
+
+/** One completed filesystem action, recorded in queue_events like an HTTP exchange. */
+export interface FsTrace {
+  readonly op: string;
+  readonly path: string;
+  readonly detail: string | null;
+  readonly durationMs: number;
+  readonly error: string | null;
+}
+
+export type FsTraceSink = (trace: FsTrace) => void;
+
+/** Instances whose database references a path - injected to avoid a circular dependency. */
+export type PathReferenceLookup = (target: string) => Promise<readonly number[]>;
+
+export interface MeasureOptions {
+  readonly signal?: AbortSignal;
+  readonly maxEntries?: number;
+}
+
+const DEFAULT_MAX_ENTRIES = 50_000;
+const LOW_SPACE_BYTES = 1024 * 1024 * 1024; // 1 GiB
+
+function ok(id: string, message: string): FsCheck {
+  return { id, status: 'ok', message };
+}
+
+function warning(id: string, message: string): FsCheck {
+  return { id, status: 'warning', message };
+}
+
+function blocker(id: string, message: string): FsCheck {
+  return { id, status: 'blocker', message };
+}
+
+function formatBytes(bytes: number): string {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(value >= 100 || unit === 0 ? 0 : 1)} ${units[unit] ?? 'B'}`;
+}
+
+/**
+ * Directory operations on mounted storage.
+ *
+ * Every method resolves its arguments through PathGuard first, and every mutation runs its
+ * own preflight and refuses on any blocker - including when called from the queue executor,
+ * because the disk can change between staging and Apply All.
+ */
+export class FilesystemService {
+  private references: PathReferenceLookup = async () => [];
+  private readonly measurements = new Map<string, { at: number; value: FsMeasurement }>();
+
+  constructor(
+    readonly guard: PathGuard,
+    private readonly onTrace: FsTraceSink = () => {},
+  ) {}
+
+  /** Wired after construction: the reconcile service needs this service to scan. */
+  setReferenceLookup(lookup: PathReferenceLookup): void {
+    this.references = lookup;
+  }
+
+  /**
+   * A view of this service that reports into one queue item's audit trail. Shares the
+   * guard, the reference lookup and the measurement cache - only the sink differs.
+   */
+  withTraceSink(sink: FsTraceSink): FilesystemService {
+    const scoped = new FilesystemService(this.guard, sink);
+    scoped.setReferenceLookup(this.references);
+    return scoped;
+  }
+
+  get enabled(): boolean {
+    return this.guard.enabled;
+  }
+
+  get rootPaths(): string[] {
+    return this.guard.roots.filter((root) => root.exists).map((root) => root.real);
+  }
+
+  roots(): FsRootsResponse {
+    return {
+      enabled: this.guard.enabled,
+      roots: this.guard.roots.map(
+        (root): FsRoot => ({
+          path: root.real,
+          exists: root.exists,
+          readable: root.readable,
+          writable: root.writable,
+          deviceId: root.deviceId,
+          freeSpace: root.freeSpace,
+          totalSpace: root.totalSpace,
+          error: root.error,
+        }),
+      ),
+    };
+  }
+
+  // ----------------------------------------------------------------- reading
+
+  /** One directory. Lazy by design: a media library is far too large to walk eagerly. */
+  async list(input: string): Promise<FsListResponse> {
+    const target = await this.guard.resolve(input);
+    const stats = await describePath(target);
+
+    if (!stats.exists) {
+      throw new FsError({ code: 'fs_not_found', message: `${target} does not exist`, path: target, httpStatus: 404 });
+    }
+    if (stats.isSymlink) {
+      throw new FsError({
+        code: 'fs_is_symlink',
+        message: `${target} is a symlink - ArrRanger does not follow links; browse the target path directly`,
+        path: target,
+      });
+    }
+    if (!stats.isDirectory) {
+      throw new FsError({ code: 'fs_not_a_directory', message: `${target} is not a directory`, path: target });
+    }
+
+    const dirents = await readdir(target, { withFileTypes: true });
+    const entries = await Promise.all(
+      dirents.map(async (dirent): Promise<FsEntry> => {
+        const child = path.join(target, dirent.name);
+        const kind = dirent.isSymbolicLink()
+          ? 'symlink'
+          : dirent.isDirectory()
+            ? 'directory'
+            : dirent.isFile()
+              ? 'file'
+              : 'other';
+
+        const [childStats, readable, writable, childCount] = await Promise.all([
+          describePath(child),
+          canAccess(child, ACCESS_READ),
+          canAccess(child, ACCESS_WRITE),
+          kind === 'directory' ? this.countChildren(child) : Promise.resolve(null),
+        ]);
+
+        return {
+          path: child,
+          name: dirent.name,
+          kind,
+          modifiedAt: childStats.modifiedAt,
+          childCount,
+          sizeOnDisk: kind === 'file' ? childStats.size : null,
+          fileCount: null,
+          readable,
+          writable,
+        };
+      }),
+    );
+
+    entries.sort((a, b) => {
+      if (a.kind !== b.kind) return a.kind === 'directory' ? -1 : 1;
+      return a.name.localeCompare(b.name, 'en', { sensitivity: 'base' });
+    });
+
+    const parent = this.guard.isRoot(target) ? null : path.dirname(target);
+    return { path: target, parent: parent !== null && this.guard.rootFor(parent) ? parent : null, entries };
+  }
+
+  private async countChildren(target: string): Promise<number | null> {
+    try {
+      return (await readdir(target)).length;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Recursive size. Opt-in per folder and capped: this is the one operation that can take
+   * minutes on a real array, so it never runs implicitly.
+   */
+  async measure(input: string, options: MeasureOptions = {}): Promise<FsMeasurement> {
+    const target = await this.guard.resolve(input);
+    const cached = this.measurements.get(target);
+    if (cached !== undefined && Date.now() - cached.at < 60_000) return cached.value;
+
+    const maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
+    let sizeOnDisk = 0;
+    let fileCount = 0;
+    let directoryCount = 0;
+    let visited = 0;
+    let truncated = false;
+
+    const walk = async (dir: string): Promise<void> => {
+      if (truncated) return;
+      let dirents;
+      try {
+        dirents = await readdir(dir, { withFileTypes: true });
+      } catch {
+        return; // unreadable subtree: reported as a lower bound
+      }
+
+      for (const dirent of dirents) {
+        options.signal?.throwIfAborted();
+        if (visited >= maxEntries) {
+          truncated = true;
+          return;
+        }
+        visited += 1;
+
+        const child = path.join(dir, dirent.name);
+        if (dirent.isSymbolicLink()) continue; // never follow links while measuring
+        if (dirent.isDirectory()) {
+          directoryCount += 1;
+          await walk(child);
+        } else if (dirent.isFile()) {
+          fileCount += 1;
+          try {
+            sizeOnDisk += (await stat(child)).size;
+          } catch {
+            // vanished mid-walk
+          }
+        }
+      }
+    };
+
+    await walk(target);
+    const value: FsMeasurement = { path: target, sizeOnDisk, fileCount, directoryCount, truncated };
+    this.measurements.set(target, { at: Date.now(), value });
+    return value;
+  }
+
+  invalidateMeasurements(): void {
+    this.measurements.clear();
+  }
+
+  // --------------------------------------------------------------- preflight
+
+  /**
+   * What would happen if this ran. Returned to the UI before staging, and re-run by the
+   * executor immediately before the operation.
+   */
+  async preflight<K extends FsOp>(op: K, payload: QueuePayloadFor<K>): Promise<FsPreflight> {
+    switch (op) {
+      case 'fs.mkdir':
+        return this.preflightMkdir(payload as QueuePayloadFor<'fs.mkdir'>);
+      case 'fs.rename':
+        return this.preflightRelocation('fs.rename', payload as QueuePayloadFor<'fs.rename'>);
+      case 'fs.move':
+        return this.preflightRelocation('fs.move', payload as QueuePayloadFor<'fs.move'>);
+      case 'fs.delete':
+        return this.preflightDelete(payload as QueuePayloadFor<'fs.delete'>);
+      default:
+        throw new FsError({ code: 'fs_unsupported_op', message: `Unknown filesystem operation ${op}` });
+    }
+  }
+
+  private finish(
+    op: FsOp,
+    checks: FsCheck[],
+    extra: { measurement?: FsMeasurement | null; freeSpace?: number | null; referencedBy?: readonly number[] } = {},
+  ): FsPreflight {
+    return {
+      op,
+      ok: !checks.some((check) => check.status === 'blocker'),
+      checks,
+      measurement: extra.measurement ?? null,
+      freeSpace: extra.freeSpace ?? null,
+      referencedBy: extra.referencedBy ?? [],
+    };
+  }
+
+  private async preflightMkdir(payload: QueuePayloadFor<'fs.mkdir'>): Promise<FsPreflight> {
+    const target = await this.guard.resolve(payload.path);
+    const checks: FsCheck[] = [ok('inside_root', `${target} is inside an allowed storage root`)];
+
+    const stats = await describePath(target);
+    if (stats.exists) {
+      checks.push(blocker('destination_free', `${target} already exists`));
+    } else {
+      checks.push(ok('destination_free', 'Destination does not exist yet'));
+    }
+
+    const parent = path.dirname(target);
+    const parentStats = await describePath(parent);
+    if (!parentStats.exists) {
+      checks.push(
+        payload.recursive
+          ? warning('parent_exists', `${parent} does not exist and will be created`)
+          : blocker('parent_exists', `${parent} does not exist - enable recursive to create it`),
+      );
+    } else if (!(await canAccess(parent, ACCESS_WRITE))) {
+      checks.push(blocker('parent_writable', `No write permission on ${parent}`));
+    } else {
+      checks.push(ok('parent_writable', `${parent} is writable`));
+    }
+
+    const freeSpace = await freeSpaceAt(parentStats.exists ? parent : (this.rootPaths[0] ?? '/'));
+    if (freeSpace !== null && freeSpace < LOW_SPACE_BYTES) {
+      checks.push(warning('free_space', `Only ${formatBytes(freeSpace)} free on that filesystem`));
+    }
+
+    return this.finish('fs.mkdir', checks, { freeSpace });
+  }
+
+  private async preflightRelocation(
+    op: 'fs.rename' | 'fs.move',
+    payload: { from: string; to: string },
+  ): Promise<FsPreflight> {
+    const from = await this.guard.resolve(payload.from);
+    const to = await this.guard.resolve(payload.to);
+    const checks: FsCheck[] = [ok('inside_root', 'Both paths are inside allowed storage roots')];
+
+    this.guard.assertMutable(from);
+
+    const fromStats = await describePath(from);
+    checks.push(...this.sourceChecks(from, fromStats));
+    if (await isMountPoint(from)) {
+      checks.push(blocker('not_mount_point', `${from} is a mount point, not a folder on it`));
+    }
+
+    const toStats = await describePath(to);
+    if (toStats.exists) {
+      checks.push(blocker('destination_free', `${to} already exists`));
+    } else {
+      checks.push(ok('destination_free', 'Destination does not exist yet'));
+    }
+
+    const toParent = path.dirname(to);
+    const fromParent = path.dirname(from);
+
+    if (op === 'fs.rename' && toParent !== fromParent) {
+      checks.push(
+        blocker('same_parent', 'A rename keeps the folder in place - use move to change directories'),
+      );
+    }
+    if (op === 'fs.move' && toParent === fromParent) {
+      checks.push(warning('same_parent', 'Source and destination share a parent - this is a rename'));
+    }
+
+    const toParentStats = await describePath(toParent);
+    if (!toParentStats.exists) {
+      checks.push(blocker('destination_parent', `${toParent} does not exist`));
+    } else if (!(await canAccess(toParent, ACCESS_WRITE))) {
+      checks.push(blocker('destination_writable', `No write permission on ${toParent}`));
+    } else {
+      checks.push(ok('destination_writable', `${toParent} is writable`));
+    }
+
+    // A rename cannot cross filesystems, and ArrRanger will not silently copy terabytes.
+    if (fromStats.exists && toParentStats.exists && fromStats.deviceId !== toParentStats.deviceId) {
+      const measurement = await this.measure(from).catch(() => null);
+      const size = measurement === null ? 'the folder' : formatBytes(measurement.sizeOnDisk);
+      checks.push(
+        blocker(
+          'same_device',
+          `${from} and ${toParent} are on different filesystems (${String(fromStats.deviceId)} -> ${String(toParentStats.deviceId)}). ${size} would have to be copied - move it with your own tool, then use Reconcile & Align.`,
+        ),
+      );
+    } else if (fromStats.exists) {
+      checks.push(ok('same_device', 'Same filesystem - the move is an atomic rename'));
+    }
+
+    if (!(await canAccess(fromParent, ACCESS_WRITE))) {
+      checks.push(blocker('source_parent_writable', `No write permission on ${fromParent}`));
+    }
+
+    return this.finish(op, checks, { freeSpace: await freeSpaceAt(toParentStats.exists ? toParent : from) });
+  }
+
+  private async preflightDelete(payload: QueuePayloadFor<'fs.delete'>): Promise<FsPreflight> {
+    const target = await this.guard.resolve(payload.path);
+    const checks: FsCheck[] = [ok('inside_root', `${target} is inside an allowed storage root`)];
+
+    this.guard.assertMutable(target);
+
+    const stats = await describePath(target);
+    checks.push(...this.sourceChecks(target, stats));
+    if (await isMountPoint(target)) {
+      checks.push(blocker('not_mount_point', `${target} is a mount point and will not be deleted`));
+    }
+
+    const parent = path.dirname(target);
+    if (!(await canAccess(parent, ACCESS_WRITE))) {
+      checks.push(blocker('parent_writable', `No write permission on ${parent}`));
+    }
+
+    let measurement: FsMeasurement | null = null;
+    if (stats.exists && stats.isDirectory && !stats.isSymlink) {
+      const children = await readdir(target).catch(() => []);
+      measurement = await this.measure(target).catch(() => null);
+
+      if (children.length > 0 && !payload.recursive) {
+        checks.push(
+          blocker(
+            'recursive_required',
+            `${target} is not empty (${String(children.length)} entries) - recursive deletion must be enabled`,
+          ),
+        );
+      } else if (children.length === 0) {
+        checks.push(ok('empty', 'Directory is empty'));
+      } else if (measurement !== null) {
+        checks.push(
+          warning(
+            'recursive_delete',
+            `Deletes ${formatBytes(measurement.sizeOnDisk)} in ${String(measurement.fileCount)} file(s)${measurement.truncated ? ' (at least - the walk hit its cap)' : ''}`,
+          ),
+        );
+      }
+    }
+
+    const referencedBy = await this.references(target);
+    if (referencedBy.length > 0) {
+      checks.push(
+        payload.force
+          ? warning(
+              'referenced_by_arr',
+              `${String(referencedBy.length)} connected instance(s) still reference this path - forced`,
+            )
+          : blocker(
+              'referenced_by_arr',
+              `${String(referencedBy.length)} connected instance(s) still have media at this path - remove it there first, or force the deletion`,
+            ),
+      );
+    } else {
+      checks.push(ok('referenced_by_arr', 'No connected instance references this path'));
+    }
+
+    return this.finish('fs.delete', checks, { measurement, referencedBy });
+  }
+
+  private sourceChecks(target: string, stats: PathStats): FsCheck[] {
+    if (!stats.exists) {
+      return [blocker('source_exists', `${target} does not exist`)];
+    }
+    if (stats.isSymlink) {
+      return [blocker('not_symlink', `${target} is a symlink - ArrRanger does not follow or mutate links`)];
+    }
+    if (!stats.isDirectory) {
+      return [blocker('is_directory', `${target} is not a directory - only folders can be staged`)];
+    }
+    return [ok('source_exists', `${target} exists and is a directory`)];
+  }
+
+  // --------------------------------------------------------------- mutations
+
+  private assertPreflightPassed(preflight: FsPreflight): void {
+    const first = preflight.checks.find((check) => check.status === 'blocker');
+    if (first === undefined) return;
+
+    throw new FsError({
+      code: first.id === 'same_device' ? 'fs_cross_device' : blockerCode(first.id),
+      message: first.message,
+      details: { checks: preflight.checks.filter((check) => check.status !== 'ok') },
+    });
+  }
+
+  private async traced<T>(op: string, target: string, detail: string | null, run: () => Promise<T>): Promise<T> {
+    const startedAt = performance.now();
+    try {
+      const result = await run();
+      this.onTrace({ op, path: target, detail, durationMs: Math.round(performance.now() - startedAt), error: null });
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.onTrace({ op, path: target, detail, durationMs: Math.round(performance.now() - startedAt), error: message });
+      throw error;
+    }
+  }
+
+  async mkdirp(payload: QueuePayloadFor<'fs.mkdir'>): Promise<{ path: string }> {
+    const preflight = await this.preflight('fs.mkdir', payload);
+    this.assertPreflightPassed(preflight);
+
+    const target = await this.guard.resolve(payload.path);
+    await this.traced('mkdir', target, payload.recursive ? 'recursive' : null, async () => {
+      await mkdir(target, { recursive: payload.recursive });
+    });
+
+    this.invalidateMeasurements();
+    return { path: target };
+  }
+
+  async relocate(
+    op: 'fs.rename' | 'fs.move',
+    payload: { from: string; to: string },
+  ): Promise<{ from: string; to: string }> {
+    const preflight = await this.preflight(op, payload);
+    this.assertPreflightPassed(preflight);
+
+    const from = await this.guard.resolve(payload.from);
+    const to = await this.guard.resolve(payload.to);
+
+    await this.traced(op === 'fs.rename' ? 'rename' : 'move', from, `-> ${to}`, async () => {
+      await rename(from, to);
+    });
+
+    this.invalidateMeasurements();
+    return { from, to };
+  }
+
+  async remove(payload: QueuePayloadFor<'fs.delete'>): Promise<{
+    path: string;
+    freedBytes: number;
+    fileCount: number;
+  }> {
+    const preflight = await this.preflight('fs.delete', payload);
+    this.assertPreflightPassed(preflight);
+
+    const target = await this.guard.resolve(payload.path);
+    const measurement = preflight.measurement;
+
+    await this.traced('delete', target, payload.recursive ? 'recursive' : 'empty only', async () => {
+      if (payload.recursive) {
+        await rm(target, { recursive: true, force: false });
+      } else {
+        // rmdir refuses a non-empty directory itself: if the preflight raced with a write,
+        // the kernel still stops us from deleting anything unexpected.
+        await rmdir(target);
+      }
+    });
+
+    this.invalidateMeasurements();
+    return {
+      path: target,
+      freedBytes: measurement?.sizeOnDisk ?? 0,
+      fileCount: measurement?.fileCount ?? 0,
+    };
+  }
+}
+
+/** Maps a failed check to the error code the UI switches on. */
+function blockerCode(checkId: string): string {
+  switch (checkId) {
+    case 'source_exists':
+    case 'parent_exists':
+    case 'destination_parent':
+      return 'fs_not_found';
+    case 'destination_free':
+      return 'fs_exists';
+    case 'recursive_required':
+      return 'fs_not_empty';
+    case 'referenced_by_arr':
+      return 'fs_referenced_by_arr';
+    case 'not_symlink':
+      return 'fs_is_symlink';
+    case 'not_mount_point':
+      return 'fs_is_mount_point';
+    case 'parent_writable':
+    case 'destination_writable':
+    case 'source_parent_writable':
+      return 'fs_permission_denied';
+    case 'is_directory':
+      return 'fs_not_a_directory';
+    case 'same_parent':
+      return 'fs_precondition_failed';
+    default:
+      return 'fs_precondition_failed';
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "name": "arrranger",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "run-p dev:shared dev:server dev:web",
+    "dev:shared": "npm run -w @arrranger/shared dev",
+    "dev:server": "npm run -w @arrranger/server dev",
+    "dev:web": "npm run -w @arrranger/web dev",
+    "build": "npm run -w @arrranger/shared build && npm run -w @arrranger/server build && npm run -w @arrranger/web build",
+    "start": "node apps/server/dist/index.js",
+    "typecheck": "npm run -ws --if-present typecheck",
+    "clean": "rm -rf packages/*/dist apps/*/dist",
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up -d",
+    "docker:logs": "docker compose logs -f arrranger",
+    "test": "npm run -ws --if-present test"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.4.0",
+    "npm-run-all2": "^9.0.3",
+    "tsx": "^4.23.13",
+    "typescript": "~5.9"
+  },
+  "allowScripts": {
+    "esbuild": true
+  }
+}

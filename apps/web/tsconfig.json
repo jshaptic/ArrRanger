@@ -1,0 +1,40 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "jsx": "preserve",
+    "types": [
+      "vite/client"
+    ],
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.vue",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "env.d.ts"
+  ]
+}

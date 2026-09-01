@@ -1,0 +1,70 @@
+@import 'tailwindcss';
+
+/**
+ * ArrRanger is a dark-only tool by design - it lives next to Radarr/Sonarr/Unraid.
+ * The semantic colours below are the whole visual language of the fleet views:
+ * in-sync, missing, drifted, staged, failed. Nothing else should carry meaning.
+ */
+@theme {
+  --color-surface: #0f1115;
+  --color-raised: #171a21;
+  --color-overlay: #1c212b;
+  --color-line: #262b36;
+  --color-line-strong: #39414f;
+
+  --color-ink: #e5e7eb;
+  --color-muted: #98a2b3;
+  --color-faint: #6b7280;
+
+  --color-accent: #38bdf8;
+  --color-sync: #34d399;
+  --color-missing: #64748b;
+  --color-drift: #fbbf24;
+  --color-staged: #a78bfa;
+  --color-danger: #fb7185;
+
+  --font-mono: ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, monospace;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-surface);
+  color: var(--color-ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 14px;
+}
+
+/* Matrix columns are narrow: a slim scrollbar keeps them readable. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+
+::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--color-line-strong);
+  border-radius: 9999px;
+}
+
+@keyframes pulse-staged {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.staged-pulse {
+  animation: pulse-staged 2s ease-in-out infinite;
+}
