@@ -10,64 +10,6 @@ Nothing is sent to an *Arr instance until you press **Apply All**, which execute
 queue sequentially with a progress bar and pauses on the first failure so you are never
 left half-applied.
 
-## Change log
-
-| Version | Date | Changed by | Type | Summary | Risk |
-|---|---|---|---|---|---|
-| 4.0 | 2026-09-01 12:28 | Eugene Shatilo - Claude | Added | Phase 4 filesystem engine: path-guarded directory operations with preflight, orphan/missing reconciliation, filesystem items in the unified queue with cross-type dependencies, storage explorer and Reconcile & Align UI, media volume documentation | High |
-| 3.0 | 2026-09-01 11:23 | Eugene Shatilo - Claude | Added | Phase 3 frontend: fleet-wide Pinia stores, tag parity matrix, root folder topology with drift detection, import list comparison, GParted-style staging drawer and execution modal, 42 component/store tests | Medium |
-| 2.0 | 2026-09-01 00:00 | Eugene Shatilo - Claude | Added | Phase 2 backend: ArrClient with *Arr error mapping, staging queue CRUD, sequential run engine with safety halt and SSE progress, full REST surface, 36 integration tests | Medium |
-| 1.0 | 2026-08-31 23:32 | Eugene Shatilo - Claude | Added | Phase 1 scaffold: workspace layout, SQLite schema and typed contracts, Fastify server bootstrap, Vue 3 shell, Docker/Compose deployment | Medium |
-
-## Status
-
-**Phases 1-4 are complete and verified.** 146 tests, all green:
-
-```bash
-npm test
-```
-
-- **82 server tests** drive the real API against a faithful fake Radarr/Sonarr and a real
-  temp filesystem: instance CRUD, credential probing, *Arr error mapping, the snapshot
-  cache, staging, reordering, applying, halting, resuming, cancelling, SSE progress, the
-  audit trail, restart recovery, the path-traversal boundary, every filesystem preflight,
-  the schema migration, and mixed disk + API recipes.
-- **64 frontend tests** cover the fleet normalisation (parity, drift, mount-point
-  conflicts, find &amp; replace), the storage tree helpers, the fan-out staging store
-  (including cross-type dependency chains) and the mounted views - clicking a gap in the
-  matrix really does stage one operation for exactly that instance, and pruning a folder
-  really does refuse until you type its name.
-
-The whole chain was also run end to end twice: once with three fake instances against the
-live API to produce the matrix and the discrepancy report, and once in a **container with a
-bind-mounted media volume**, where a staged recipe renamed a directory on the host and the
-instance followed it with `moveFiles: false` - then, with the volume made read-only, the
-same recipe halted on the disk step having made zero *Arr requests.
-
-## Layout
-
-```
-packages/shared        @arrranger/shared - contracts used by both server and UI
-apps/server            @arrranger/server - Fastify 5 + better-sqlite3
-  src/arr/             HTTP transport + typed Radarr/Sonarr client
-  src/fs/              path guard + filesystem engine (node:fs/promises)
-  src/repositories/    SQLite access, one repository per table group
-  src/services/        instance probing, snapshot-backed resource reads
-  src/queue/           handlers, event bus, the sequential executor
-  src/routes/          REST + SSE surface under /api
-  src/__tests__/       fake *Arr server and the integration suites
-apps/web               @arrranger/web    - Vue 3 + Vite + Tailwind v4
-  src/lib/             pure fleet normalisation (parity, drift, discrepancies)
-  src/stores/          instances, matrix, queue, ui (Pinia, setup style)
-  src/components/      base primitives, fleet cells, staging drawer, dialogs
-  src/views/           tag matrix, root topology, import lists, storage, queue, instances
-docker/                container entrypoint
-```
-
-The queue contract lives in [packages/shared/src/queue.ts](packages/shared/src/queue.ts).
-The `QueueOpPayloads` map there is the single source of truth: add an operation and every
-exhaustive switch in the server and the UI stops compiling until it is handled.
-
 ## Requirements
 
 - Node.js >= 22 (developed on 24)
@@ -520,25 +462,3 @@ Errors are mapped to codes the UI can act on rather than raw statuses: `arr_unau
   `allowScripts` in package.json. The package ships musl prebuilds, but the npm inside
   the base image still runs the implicit `node-gyp rebuild`, so the builder stage
   installs `python3 make g++`. None of it reaches the runtime image.
-
-## Troubleshooting
-
-- **`docker build` fails with `ECONNRESET` during `npm ci`** - BuildKit has no working
-  egress in some WSL2 setups. Build with `docker build --network=host -t arrranger:latest .`
-- **`database is locked` on Unraid** - the `/config` volume is on a `/mnt/user/...`
-  FUSE share; move it to the cache disk.
-
-## Roadmap
-
-**Next**
-- quality profile parity (needs `/api/v3/qualityprofile` in the snapshot cache, which is
-  why profile alignment is deliberately absent rather than guessed)
-- a cross-device move engine (copy -> verify -> delete with progress on the run stream),
-  which is the only reason a move is refused today
-- drag-and-drop reordering in the staging drawer
-- saved fleet "policies": stage the diff needed to bring every instance to a target state
-
-**Later**
-- optional authentication for instances exposed beyond the LAN
-- undo support for reversible operations (tag assignment, root folder moves without
-  `moveFiles`)

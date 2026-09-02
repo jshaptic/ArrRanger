@@ -35,21 +35,6 @@ const filesystem = useFilesystemStore();
 const title = computed(() => route.meta.title ?? 'ArrRanger');
 const hint = computed(() => route.meta.hint ?? '');
 
-const fleetHealth = computed(() => {
-  const stats = matrix.stats;
-  if (stats.instances === 0) return { label: 'no instances', classes: 'text-faint' };
-  if (stats.failing > 0) {
-    return { label: `${String(stats.failing)}/${String(stats.instances)} unreachable`, classes: 'text-danger' };
-  }
-  if (stats.tagsDrifted > 0 || stats.pathDiscrepancies > 0) {
-    return {
-      label: `${String(stats.tagsDrifted)} tag gaps · ${String(stats.pathDiscrepancies)} path conflicts`,
-      classes: 'text-drift',
-    };
-  }
-  return { label: 'fleet in sync', classes: 'text-sync' };
-});
-
 onMounted(async () => {
   await instances.load();
   await Promise.all([matrix.load(), queue.load(), filesystem.loadRoots()]);
@@ -73,12 +58,12 @@ watch(
     <header class="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-5 py-3">
       <div class="flex items-baseline gap-2.5">
         <span class="text-base font-semibold tracking-tight text-ink">ArrRanger</span>
-        <span class="hidden text-[11px] text-faint sm:inline">
-          one pane of glass over every Radarr &amp; Sonarr
-        </span>
+        <span class="text-faint" aria-hidden="true">/</span>
+        <h1 class="text-base font-semibold text-ink">{{ title }}</h1>
+        <span v-if="hint" class="hidden text-[11px] text-muted sm:inline">{{ hint }}</span>
       </div>
 
-      <nav class="order-3 flex flex-wrap gap-1 md:order-none">
+      <nav class="ml-auto flex flex-wrap gap-1">
         <RouterLink
           v-for="item in NAV"
           :key="item.to"
@@ -107,20 +92,9 @@ watch(
           </span>
         </RouterLink>
       </nav>
-
-      <div class="ml-auto flex items-center gap-3 text-[11px]">
-        <span :class="fleetHealth.classes">{{ fleetHealth.label }}</span>
-        <span class="text-faint">
-          {{ matrix.stats.healthy }}/{{ matrix.stats.instances }} instances
-        </span>
-      </div>
     </header>
 
     <main class="min-h-0 flex-1 overflow-y-auto px-5 pt-4 pb-24">
-      <div class="mb-4">
-        <h1 class="text-lg font-semibold text-ink">{{ title }}</h1>
-        <p v-if="hint" class="text-xs text-muted">{{ hint }}</p>
-      </div>
       <RouterView />
     </main>
 

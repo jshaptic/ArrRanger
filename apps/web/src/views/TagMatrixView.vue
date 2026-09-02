@@ -5,9 +5,9 @@ import BaseButton from '@/components/base/BaseButton.vue';
 import EmptyState from '@/components/base/EmptyState.vue';
 import FleetBar from '@/components/fleet/FleetBar.vue';
 import InstanceColumnHeader from '@/components/fleet/InstanceColumnHeader.vue';
-import MatrixLegend from '@/components/fleet/MatrixLegend.vue';
 import ParityBadge from '@/components/fleet/ParityBadge.vue';
 import TagCellView from '@/components/fleet/TagCellView.vue';
+import AddTagDialog from '@/components/tags/AddTagDialog.vue';
 import DeleteTagsDialog from '@/components/tags/DeleteTagsDialog.vue';
 import FindReplaceDialog from '@/components/tags/FindReplaceDialog.vue';
 import RenameTagsDialog from '@/components/tags/RenameTagsDialog.vue';
@@ -25,6 +25,7 @@ const filter = ref<Filter>('all');
 const selectedLabels = ref<string[]>([]);
 
 const showFindReplace = ref(false);
+const adding = ref(false);
 const renaming = ref<{ label: string; targets: TagTarget[] } | null>(null);
 const deleting = ref<TagTarget[] | null>(null);
 
@@ -109,11 +110,6 @@ async function propagateSelected(): Promise<void> {
   selectedLabels.value = [];
 }
 
-async function propagateRow(row: TagMatrixRow): Promise<void> {
-  const instanceIds = row.missingOn.filter((instanceId) => targets.value.includes(instanceId));
-  await queue.propagateTag(row.label, instanceIds);
-}
-
 function renameRow(row: TagMatrixRow): void {
   renaming.value = {
     label: row.label,
@@ -121,12 +117,6 @@ function renameRow(row: TagMatrixRow): void {
       .filter((cell) => cell.known && cell.present && targets.value.includes(cell.instanceId))
       .map((cell) => ({ instanceId: cell.instanceId, tagId: cell.tagId ?? 0, label: row.label })),
   };
-}
-
-function deleteRow(row: TagMatrixRow): void {
-  deleting.value = row.cells
-    .filter((cell) => cell.known && cell.present && targets.value.includes(cell.instanceId))
-    .map((cell) => ({ instanceId: cell.instanceId, tagId: cell.tagId ?? 0, label: row.label }));
 }
 
 /** Clicking a missing cell stages that one create - the fastest way to close a gap. */
@@ -146,28 +136,6 @@ onMounted(() => {
 <template>
   <div class="space-y-4">
     <FleetBar />
-
-    <!-- fleet-level counters -->
-    <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      <div class="rounded-lg border border-line bg-raised/60 px-3 py-2">
-        <p class="text-[11px] text-muted">Unique tags</p>
-        <p class="font-mono text-lg text-ink">{{ matrix.stats.tagsTotal }}</p>
-      </div>
-      <div class="rounded-lg border border-sync/30 bg-sync/5 px-3 py-2">
-        <p class="text-[11px] text-muted">In sync everywhere</p>
-        <p class="font-mono text-lg text-sync">{{ matrix.stats.tagsInSync }}</p>
-      </div>
-      <div class="rounded-lg border border-drift/30 bg-drift/5 px-3 py-2">
-        <p class="text-[11px] text-muted">Missing somewhere</p>
-        <p class="font-mono text-lg text-drift">{{ matrix.stats.tagsDrifted }}</p>
-      </div>
-      <div class="rounded-lg border border-line bg-raised/60 px-3 py-2">
-        <p class="text-[11px] text-muted">Staged tag changes</p>
-        <p class="font-mono text-lg text-staged">
-          {{ queue.impact.byKind.find((entry) => entry.kind === 'tag')?.targets ?? 0 }}
-        </p>
-      </div>
-    </div>
 
     <!-- toolbar -->
     <div class="flex flex-wrap items-center gap-2">
@@ -195,6 +163,7 @@ onMounted(() => {
       </span>
 
       <div class="ml-auto flex flex-wrap items-center gap-2">
+        <BaseButton size="sm" variant="primary" @click="adding = true">New tag…</BaseButton>
         <BaseButton
           size="sm"
           variant="success"
@@ -227,8 +196,6 @@ onMounted(() => {
         </BaseButton>
       </div>
     </div>
-
-    <MatrixLegend />
 
     <EmptyState
       v-if="matrix.columns.length === 0"
@@ -275,9 +242,6 @@ onMounted(() => {
               :key="column.instance.id"
               :column="column"
             />
-            <th scope="col" class="border-b border-l border-line bg-raised px-2 py-2 text-right text-[11px] font-semibold text-muted">
-              Row actions
-            </th>
           </tr>
         </thead>
 
@@ -328,31 +292,12 @@ onMounted(() => {
               @create="stageCellCreate(row, cell.instanceId)"
               @remove="stageCellDelete(row, cell.instanceId, cell.tagId)"
             />
-
-            <td class="border-b border-l border-line px-2 py-1.5 text-right whitespace-nowrap">
-              <span class="inline-flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                <BaseButton
-                  size="sm"
-                  variant="ghost"
-                  :disabled="row.missingOn.length === 0"
-                  :title="`Stage this tag on ${row.missingOn.length} instance(s) missing it`"
-                  @click="propagateRow(row)"
-                >
-                  propagate
-                </BaseButton>
-                <BaseButton size="sm" variant="ghost" title="Rename across the fleet" @click="renameRow(row)">
-                  rename
-                </BaseButton>
-                <BaseButton size="sm" variant="ghost" title="Delete across the fleet" @click="deleteRow(row)">
-                  delete
-                </BaseButton>
-              </span>
-            </td>
           </tr>
         </tbody>
       </table>
     </div>
 
+    <AddTagDialog v-if="adding" @close="adding = false" />
     <FindReplaceDialog v-if="showFindReplace" @close="showFindReplace = false" />
     <RenameTagsDialog
       v-if="renaming"

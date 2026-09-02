@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import BaseButton from '@/components/base/BaseButton.vue';
+import BaseSelect, { type SelectOption } from '@/components/base/BaseSelect.vue';
 import ImpactSummary from '@/components/staging/ImpactSummary.vue';
 import StagedOperationRow from '@/components/staging/StagedOperationRow.vue';
 import { initialsOf } from '@/lib/format';
@@ -8,12 +9,19 @@ import { useQueueStore } from '@/stores/queue';
 import { useUiStore } from '@/stores/ui';
 
 type Grouping = 'instance' | 'sequence';
+type OnError = 'pause' | 'continue' | 'abort';
+
+const ON_ERROR_OPTIONS: readonly SelectOption<OnError>[] = [
+  { value: 'pause', label: 'halt the queue' },
+  { value: 'continue', label: 'keep going' },
+  { value: 'abort', label: 'abort everything' },
+];
 
 const queue = useQueueStore();
 const ui = useUiStore();
 
 const grouping = ref<Grouping>('sequence');
-const onError = ref<'pause' | 'continue' | 'abort'>('pause');
+const onError = ref<OnError>('pause');
 
 const hasStaged = computed(() => queue.staged.length > 0);
 const positions = computed(
@@ -59,14 +67,7 @@ function applyAll(): void {
       <div class="ml-auto flex items-center gap-2">
         <label class="hidden items-center gap-1.5 text-[11px] text-muted md:flex">
           on failure
-          <select
-            v-model="onError"
-            class="rounded border border-line bg-raised px-1.5 py-1 text-[11px] text-ink"
-          >
-            <option value="pause">halt the queue</option>
-            <option value="continue">keep going</option>
-            <option value="abort">abort everything</option>
-          </select>
+          <BaseSelect v-model="onError" :options="ON_ERROR_OPTIONS" size="sm" />
         </label>
         <BaseButton
           v-if="hasStaged"

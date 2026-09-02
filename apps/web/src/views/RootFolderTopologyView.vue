@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import type { NewQueueItem } from '@arrranger/shared';
 import BaseButton from '@/components/base/BaseButton.vue';
 import EmptyState from '@/components/base/EmptyState.vue';
 import FleetBar from '@/components/fleet/FleetBar.vue';
 import InstanceColumnHeader from '@/components/fleet/InstanceColumnHeader.vue';
-import MatrixLegend from '@/components/fleet/MatrixLegend.vue';
 import ParityBadge from '@/components/fleet/ParityBadge.vue';
 import RootCellView from '@/components/fleet/RootCellView.vue';
 import AddPathDialog from '@/components/roots/AddPathDialog.vue';
 import RemapDialog from '@/components/roots/RemapDialog.vue';
+import RemoveRootFoldersDialog from '@/components/roots/RemoveRootFoldersDialog.vue';
 import { formatBytes } from '@/lib/format';
 import type { RootFolderRow } from '@/lib/matrix';
 import { useMatrixStore } from '@/stores/matrix';
@@ -19,14 +20,79 @@ const queue = useQueueStore();
 
 const adding = ref<{ path: string; preselect: number[] } | null>(null);
 const remapping = ref<string | null>(null);
+const removing = ref<RootFolderTarget[] | null>(null);
+
+const search = ref('');
+const selectedPaths = ref<string[]>([]);
 
 const targets = computed(() => matrix.targetInstanceIds);
+
+const rows = computed(() => {
+  const needle = search.value.trim().toLowerCase();
+  if (needle.length === 0) return matrix.rootFolderRows;
+  return matrix.rootFolderRows.filter((row) => row.path.toLowerCase().includes(needle));
+});
+
+const selectedRows = computed(() =>
+  rows.value.filter((row) => selectedPaths.value.includes(row.path)),
+);
+
+const allVisibleSelected = computed(
+  () => rows.value.length > 0 && selectedRows.value.length === rows.value.length,
+);
+
+const propagatable = computed(() =>
+  selectedRows.value.flatMap((row) =>
+    row.missingOn.filter((instanceId) => targets.value.includes(instanceId)),
+  ),
+);
+
+const deletable = computed<RootFolderTarget[]>(() =>
+  selectedRows.value.flatMap((row) =>
+    row.cells
+      .filter((cell) => cell.known && cell.present && targets.value.includes(cell.instanceId))
+      .map((cell) => ({
+        instanceId: cell.instanceId,
+        rootFolderId: cell.rootFolderId ?? 0,
+        path: row.path,
+      })),
+  ),
+);
+
+function toggleRow(path: string): void {
+  selectedPaths.value = selectedPaths.value.includes(path)
+    ? selectedPaths.value.filter((entry) => entry !== path)
+    : [...selectedPaths.value, path];
+}
+
+function toggleAllVisible(): void {
+  selectedPaths.value = allVisibleSelected.value ? [] : rows.value.map((row) => row.path);
+}
 
 function instanceName(instanceId: number): string {
   return (
     matrix.columns.find((column) => column.instance.id === instanceId)?.instance.name ??
     `instance ${String(instanceId)}`
   );
+}
+
+/** "Propagate missing path to all": one create per instance that lacks it. */
+async function propagateSelected(): Promise<void> {
+  const batch: NewQueueItem[] = selectedRows.value.flatMap((row) =>
+    row.missingOn
+      .filter((instanceId) => targets.value.includes(instanceId))
+      .map((instanceId) => ({
+        instanceId,
+        op: 'rootFolder.create' as const,
+        payload: { path: row.path },
+      })),
+  );
+
+  await queue.stage(
+    batch,
+    `${String(selectedRows.value.length)} root folder(s) on ${String(new Set(batch.map((item) => item.instanceId)).size)} instance(s)`,
+  );
+  selectedPaths.value = [];
 }
 
 function propagateRow(row: RootFolderRow): void {
@@ -37,14 +103,13 @@ function propagateRow(row: RootFolderRow): void {
 }
 
 function removeRow(row: RootFolderRow): void {
-  const removals: RootFolderTarget[] = row.cells
+  removing.value = row.cells
     .filter((cell) => cell.known && cell.present && targets.value.includes(cell.instanceId))
     .map((cell) => ({
       instanceId: cell.instanceId,
       rootFolderId: cell.rootFolderId ?? 0,
       path: row.path,
     }));
-  void queue.deleteRootFolderAcross(removals);
 }
 
 function stageCellCreate(row: RootFolderRow, instanceId: number): void {
@@ -52,9 +117,7 @@ function stageCellCreate(row: RootFolderRow, instanceId: number): void {
 }
 
 function stageCellRemove(row: RootFolderRow, instanceId: number, rootFolderId: number | null): void {
-  void queue.deleteRootFolderAcross([
-    { instanceId, rootFolderId: rootFolderId ?? 0, path: row.path },
-  ]);
+  removing.value = [{ instanceId, rootFolderId: rootFolderId ?? 0, path: row.path }];
 }
 
 onMounted(() => {
@@ -66,75 +129,47 @@ onMounted(() => {
   <div class="space-y-4">
     <FleetBar />
 
-    <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      <div class="rounded-lg border border-line bg-raised/60 px-3 py-2">
-        <p class="text-[11px] text-muted">Distinct paths</p>
-        <p class="font-mono text-lg text-ink">{{ matrix.stats.rootFoldersTotal }}</p>
-      </div>
-      <div class="rounded-lg border border-sync/30 bg-sync/5 px-3 py-2">
-        <p class="text-[11px] text-muted">On every instance</p>
-        <p class="font-mono text-lg text-sync">{{ matrix.stats.rootFoldersInSync }}</p>
-      </div>
-      <div class="rounded-lg border border-drift/30 bg-drift/5 px-3 py-2">
-        <p class="text-[11px] text-muted">Mount-point conflicts</p>
-        <p class="font-mono text-lg text-drift">{{ matrix.stats.pathDiscrepancies }}</p>
-      </div>
-      <div class="rounded-lg border border-danger/30 bg-danger/5 px-3 py-2">
-        <p class="text-[11px] text-muted">Inaccessible</p>
-        <p class="font-mono text-lg text-danger">{{ matrix.stats.rootFoldersInaccessible }}</p>
-      </div>
-    </div>
-
-    <!-- discrepancy report: the reason this view exists -->
-    <section
-      v-if="matrix.pathDiscrepancies.length > 0"
-      class="rounded-lg border border-drift/40 bg-drift/5 px-4 py-3"
-    >
-      <h2 class="mb-2 flex items-center gap-2 text-sm font-semibold text-drift">
-        ⚠ Sibling instances disagree on {{ matrix.pathDiscrepancies.length }} mount point(s)
-      </h2>
-      <ul class="space-y-2.5">
-        <li v-for="discrepancy in matrix.pathDiscrepancies" :key="discrepancy.leaf">
-          <p class="mb-1 text-[11px] text-muted">
-            library <span class="font-mono text-ink">{{ discrepancy.leaf }}</span> is mounted as
-            {{ discrepancy.variants.length }} different paths:
-          </p>
-          <div class="flex flex-wrap gap-2">
-            <span
-              v-for="variant in discrepancy.variants"
-              :key="variant.path"
-              class="flex items-center gap-2 rounded border border-line bg-raised px-2 py-1 text-[11px]"
-            >
-              <span class="font-mono text-ink">{{ variant.path }}</span>
-              <span class="text-faint">
-                {{ variant.instanceIds.map(instanceName).join(', ') }}
-              </span>
-              <button
-                type="button"
-                class="text-accent hover:underline"
-                title="Move media out of this path onto a shared one"
-                @click="remapping = variant.path"
-              >
-                re-map
-              </button>
-            </span>
-          </div>
-        </li>
-      </ul>
-      <p class="mt-2 text-[11px] leading-relaxed text-muted">
-        Same library, different container mappings. Re-mapping only rewrites the root folder
-        assignment unless you explicitly ask *Arr to move the files.
-      </p>
-    </section>
-
     <div class="flex flex-wrap items-center gap-2">
+      <input
+        v-model="search"
+        type="search"
+        placeholder="Filter paths…"
+        class="h-9 w-48 rounded-md border border-line bg-raised px-3 text-sm text-ink outline-none focus:border-accent"
+      />
       <BaseButton size="sm" variant="primary" @click="adding = { path: '', preselect: [] }">
         Add path to fleet…
       </BaseButton>
       <span class="text-[11px] text-muted">
         {{ matrix.healthyColumns.length }} instance(s) compared
       </span>
-      <MatrixLegend class="ml-auto hidden max-w-xl lg:flex" />
+
+      <span v-if="selectedRows.length > 0" class="text-xs text-staged">
+        {{ selectedRows.length }} row(s) selected
+      </span>
+
+      <div class="ml-auto flex flex-wrap items-center gap-2">
+        <BaseButton
+          size="sm"
+          variant="success"
+          :disabled="propagatable.length === 0"
+          :title="
+            propagatable.length === 0
+              ? 'Select rows that are missing on at least one targeted instance'
+              : `Stage ${propagatable.length} create(s)`
+          "
+          @click="propagateSelected()"
+        >
+          Propagate missing ({{ propagatable.length }})
+        </BaseButton>
+        <BaseButton
+          size="sm"
+          variant="danger"
+          :disabled="deletable.length === 0"
+          @click="removing = deletable"
+        >
+          Remove ({{ deletable.length }})
+        </BaseButton>
+      </div>
     </div>
 
     <EmptyState
@@ -144,15 +179,25 @@ onMounted(() => {
       icon="🗄"
     />
 
+    <EmptyState v-else-if="rows.length === 0" title="No paths match this filter" description="Clear the filter to see every root folder in the fleet." />
+
     <div v-else class="overflow-x-auto rounded-lg border border-line">
       <table class="w-full border-collapse text-xs">
         <thead>
           <tr>
             <th
               scope="col"
-              class="sticky left-0 z-20 min-w-[18rem] border-b border-line bg-raised px-3 py-2 text-left text-[11px] font-semibold text-muted"
+              class="sticky left-0 z-20 min-w-[18rem] border-b border-line bg-raised px-3 py-2 text-left"
             >
-              Path ({{ matrix.rootFolderRows.length }})
+              <label class="flex items-center gap-2 text-[11px] font-semibold text-muted">
+                <input
+                  type="checkbox"
+                  :checked="allVisibleSelected"
+                  class="accent-[var(--color-accent)]"
+                  @change="toggleAllVisible()"
+                />
+                Path ({{ rows.length }})
+              </label>
             </th>
             <InstanceColumnHeader
               v-for="column in matrix.columns"
@@ -166,12 +211,24 @@ onMounted(() => {
         </thead>
 
         <tbody>
-          <tr v-for="row in matrix.rootFolderRows" :key="row.path" class="group hover:bg-raised/40">
+          <tr
+            v-for="row in rows"
+            :key="row.path"
+            class="group"
+            :class="selectedPaths.includes(row.path) ? 'bg-accent/5' : 'hover:bg-raised/40'"
+          >
             <th
               scope="row"
-              class="sticky left-0 z-10 border-b border-line bg-surface px-3 py-1.5 text-left font-normal"
+              class="sticky left-0 z-10 border-b border-line px-3 py-1.5 text-left font-normal"
+              :class="selectedPaths.includes(row.path) ? 'bg-[#16202b]' : 'bg-surface'"
             >
-              <div class="flex items-center gap-2">
+              <label class="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  :checked="selectedPaths.includes(row.path)"
+                  class="accent-[var(--color-accent)]"
+                  @change="toggleRow(row.path)"
+                />
                 <span class="min-w-0 flex-1 truncate font-mono text-ink" :title="row.path">
                   {{ row.path }}
                 </span>
@@ -187,7 +244,7 @@ onMounted(() => {
                 >
                   ⚠ {{ row.inaccessibleOn.length }}
                 </span>
-              </div>
+              </label>
             </th>
 
             <RootCellView
@@ -257,5 +314,6 @@ onMounted(() => {
       @close="adding = null"
     />
     <RemapDialog v-if="remapping" :from-path="remapping" @close="remapping = null" />
+    <RemoveRootFoldersDialog v-if="removing" :targets="removing" @close="removing = null" />
   </div>
 </template>

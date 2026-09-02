@@ -8,7 +8,6 @@ import {
   buildImportListRows,
   buildRootFolderRows,
   buildTagRows,
-  findPathDiscrepancies,
   previewFindReplace,
   sortSnapshots,
   type InstanceSnapshot,
@@ -62,12 +61,9 @@ export const useMatrixStore = defineStore('matrix', () => {
 
   const tagRows = computed(() => buildTagRows(columns.value));
   const rootFolderRows = computed(() => buildRootFolderRows(columns.value));
-  const pathDiscrepancies = computed(() => findPathDiscrepancies(rootFolderRows.value));
   const importListRows = computed(() => buildImportListRows(columns.value));
 
-  const stats = computed(() =>
-    buildFleetStats(columns.value, tagRows.value, rootFolderRows.value, pathDiscrepancies.value),
-  );
+  const stats = computed(() => buildFleetStats(columns.value, tagRows.value, rootFolderRows.value));
 
   const allPaths = computed(() => rootFolderRows.value.map((row) => row.path));
 
@@ -196,7 +192,6 @@ export const useMatrixStore = defineStore('matrix', () => {
     failedColumns,
     tagRows,
     rootFolderRows,
-    pathDiscrepancies,
     importListRows,
     stats,
     allPaths,

@@ -3,10 +3,16 @@ import { computed, ref } from 'vue';
 import type { ConnectionTestResult, Instance, InstanceKind } from '@arrranger/shared';
 import BaseButton from '@/components/base/BaseButton.vue';
 import BaseModal from '@/components/base/BaseModal.vue';
+import BaseSelect, { type SelectOption } from '@/components/base/BaseSelect.vue';
 import { ApiRequestError } from '@/api/client';
 import { useInstancesStore } from '@/stores/instances';
 import { useMatrixStore } from '@/stores/matrix';
 import { useUiStore } from '@/stores/ui';
+
+const KIND_OPTIONS: readonly SelectOption<InstanceKind>[] = [
+  { value: 'radarr', label: 'Radarr (movies)' },
+  { value: 'sonarr', label: 'Sonarr (series)' },
+];
 
 const props = withDefaults(defineProps<{ instance?: Instance | null }>(), { instance: null });
 const emit = defineEmits<{ close: [] }>();
@@ -114,13 +120,7 @@ async function save(): Promise<void> {
         </label>
         <label class="block">
           <span class="mb-1 block text-xs text-muted">Application</span>
-          <select
-            v-model="kind"
-            class="w-full rounded-md border border-line bg-raised px-3 py-2 text-sm text-ink outline-none focus:border-accent"
-          >
-            <option value="radarr">Radarr (movies)</option>
-            <option value="sonarr">Sonarr (series)</option>
-          </select>
+          <BaseSelect v-model="kind" :options="KIND_OPTIONS" class="w-full" />
         </label>
       </div>
 

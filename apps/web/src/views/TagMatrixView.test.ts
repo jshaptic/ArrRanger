@@ -145,8 +145,8 @@ describe('TagMatrixView', () => {
     const wrapper = await mountView();
 
     const headers = wrapper.findAll('thead th');
-    // tag label column + 3 instances + row actions
-    expect(headers).toHaveLength(5);
+    // tag label column + 3 instances
+    expect(headers).toHaveLength(4);
     expect(wrapper.text()).toContain('Radarr-4K');
     expect(wrapper.text()).toContain('Sonarr-Anime');
 

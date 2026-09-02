@@ -71,28 +71,6 @@ environment:
     </EmptyState>
 
     <template v-else>
-      <!-- health -->
-      <section class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div class="rounded-lg border border-line bg-raised/60 px-3 py-2">
-          <p class="text-[11px] text-muted">Storage roots</p>
-          <p class="font-mono text-lg text-ink">{{ fs.usableRoots.length }}</p>
-        </div>
-        <div class="rounded-lg border border-drift/30 bg-drift/5 px-3 py-2">
-          <p class="text-[11px] text-muted">Orphaned folders</p>
-          <p class="font-mono text-lg text-drift">{{ fs.orphanCount }}</p>
-        </div>
-        <div class="rounded-lg border border-danger/30 bg-danger/5 px-3 py-2">
-          <p class="text-[11px] text-muted">Missing on disk</p>
-          <p class="font-mono text-lg text-danger">{{ fs.missingCount }}</p>
-        </div>
-        <div class="rounded-lg border border-line bg-raised/60 px-3 py-2">
-          <p class="text-[11px] text-muted">Staged disk changes</p>
-          <p class="font-mono text-lg text-staged">
-            {{ queue.impact.byKind.find((entry) => entry.kind === 'path')?.targets ?? 0 }}
-          </p>
-        </div>
-      </section>
-
       <!-- mapping mismatch: the diagnosis that saves an hour -->
       <section
         v-if="fs.mismatches.length > 0"

@@ -5,7 +5,6 @@ import {
   buildRootFolderRows,
   buildTagRows,
   findCollisions,
-  findPathDiscrepancies,
   previewFindReplace,
   sortSnapshots,
   type InstanceSnapshot,
@@ -167,25 +166,6 @@ describe('root folder topology', () => {
     expect(row?.inaccessibleOn).toEqual([3]);
   });
 
-  it('detects sibling instances disagreeing on a mount point', () => {
-    const discrepancies = findPathDiscrepancies(buildRootFolderRows(fleet));
-    expect(discrepancies).toHaveLength(1);
-    expect(discrepancies[0]?.leaf).toBe('movies');
-    expect(discrepancies[0]?.variants.map((variant) => variant.path)).toEqual([
-      '/data/media/movies',
-      '/media/movies',
-    ]);
-  });
-
-  it('does not flag one instance that deliberately holds both variants', () => {
-    const deliberate = [
-      snapshot(1, 'Radarr', {
-        rootFolders: [rootFolder(1, '/data/movies'), rootFolder(2, '/tank/movies')],
-      }),
-      snapshot(2, 'Radarr-2', { rootFolders: [rootFolder(3, '/data/movies')] }),
-    ];
-    expect(findPathDiscrepancies(buildRootFolderRows(deliberate))).toEqual([]);
-  });
 });
 
 describe('import list fleet', () => {

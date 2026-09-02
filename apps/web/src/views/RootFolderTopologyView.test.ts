@@ -115,17 +115,6 @@ beforeEach(() => {
 });
 
 describe('RootFolderTopologyView', () => {
-  it('reports the mount-point conflict between sibling instances', async () => {
-    const wrapper = await mountView();
-    const text = wrapper.text();
-
-    expect(text).toContain('Sibling instances disagree on 1 mount point(s)');
-    expect(text).toContain('/data/media/movies');
-    expect(text).toContain('/media/movies');
-    expect(text).toContain('Radarr-4K');
-    expect(text).toContain('Radarr-HD');
-  });
-
   it('flags an inaccessible root folder', async () => {
     const wrapper = await mountView();
     const tvRow = wrapper

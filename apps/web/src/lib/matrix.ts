@@ -57,25 +57,11 @@ export interface RootFolderCell {
 
 export interface RootFolderRow {
   readonly path: string;
-  readonly leaf: string;
   readonly cells: readonly RootFolderCell[];
   readonly presentOn: readonly number[];
   readonly missingOn: readonly number[];
   readonly inaccessibleOn: readonly number[];
   readonly parity: ParityState;
-}
-
-/**
- * Sibling instances that disagree about where the same kind of library lives -
- * `/data/media/movies` on one, `/media/movies` on another. Detected by grouping paths on
- * their last segment and flagging groups no single instance holds completely.
- */
-export interface PathDiscrepancy {
-  readonly leaf: string;
-  readonly variants: ReadonlyArray<{
-    readonly path: string;
-    readonly instanceIds: readonly number[];
-  }>;
 }
 
 export interface ImportListCell {
@@ -114,7 +100,6 @@ export interface FleetStats {
   readonly rootFoldersInSync: number;
   readonly rootFoldersDrifted: number;
   readonly rootFoldersInaccessible: number;
-  readonly pathDiscrepancies: number;
 }
 
 /** Stable column order: Radarr instances first, then Sonarr, alphabetical within a kind. */
@@ -191,12 +176,6 @@ export function buildTagRows(snapshots: readonly InstanceSnapshot[]): TagMatrixR
   return rows.sort((a, b) => a.label.localeCompare(b.label, 'en', { sensitivity: 'base' }));
 }
 
-function leafOf(path: string): string {
-  const trimmed = path.replace(/[/\\]+$/, '');
-  const segments = trimmed.split(/[/\\]/);
-  return (segments.at(-1) ?? trimmed).toLowerCase();
-}
-
 export function buildRootFolderRows(snapshots: readonly InstanceSnapshot[]): RootFolderRow[] {
   const healthy = comparable(snapshots);
   const paths = new Set<string>();
@@ -222,7 +201,6 @@ export function buildRootFolderRows(snapshots: readonly InstanceSnapshot[]): Roo
 
     return {
       path,
-      leaf: leafOf(path),
       cells,
       presentOn,
       missingOn: cells.filter((cell) => cell.known && !cell.present).map((cell) => cell.instanceId),
@@ -234,34 +212,6 @@ export function buildRootFolderRows(snapshots: readonly InstanceSnapshot[]): Roo
   });
 
   return rows.sort((a, b) => a.path.localeCompare(b.path, 'en'));
-}
-
-export function findPathDiscrepancies(rows: readonly RootFolderRow[]): PathDiscrepancy[] {
-  const byLeaf = new Map<string, RootFolderRow[]>();
-  for (const row of rows) {
-    byLeaf.set(row.leaf, [...(byLeaf.get(row.leaf) ?? []), row]);
-  }
-
-  const discrepancies: PathDiscrepancy[] = [];
-
-  for (const [leaf, group] of byLeaf) {
-    if (group.length < 2) continue;
-
-    // An instance that carries every variant itself is doing it on purpose (a 4K split,
-    // for example). Drift is when instances disagree about which variant they have.
-    const instanceIds = new Set(group.flatMap((row) => row.presentOn));
-    const holdsAll = [...instanceIds].some((instanceId) =>
-      group.every((row) => row.presentOn.includes(instanceId)),
-    );
-    if (holdsAll) continue;
-
-    discrepancies.push({
-      leaf,
-      variants: group.map((row) => ({ path: row.path, instanceIds: row.presentOn })),
-    });
-  }
-
-  return discrepancies.sort((a, b) => a.leaf.localeCompare(b.leaf, 'en'));
 }
 
 function autoAddOf(list: ArrImportList): boolean {
@@ -317,7 +267,6 @@ export function buildFleetStats(
   snapshots: readonly InstanceSnapshot[],
   tagRows: readonly TagMatrixRow[],
   rootFolderRows: readonly RootFolderRow[],
-  discrepancies: readonly PathDiscrepancy[],
 ): FleetStats {
   return {
     instances: snapshots.length,
@@ -330,7 +279,6 @@ export function buildFleetStats(
     rootFoldersInSync: rootFolderRows.filter((row) => row.parity === 'full').length,
     rootFoldersDrifted: rootFolderRows.filter((row) => row.parity !== 'full').length,
     rootFoldersInaccessible: rootFolderRows.filter((row) => row.inaccessibleOn.length > 0).length,
-    pathDiscrepancies: discrepancies.length,
   };
 }
 
