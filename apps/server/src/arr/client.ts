@@ -304,6 +304,11 @@ export class ArrClient {
   }
 }
 
+function trimTrailingSlashes(target: string): string {
+  const trimmed = target.replace(/\/+$/, '');
+  return trimmed.length === 0 ? target : trimmed;
+}
+
 /** In-memory paging + filtering over a fetched library. */
 export function pageMedia(all: readonly ArrMedia[], query: MediaQuery): MediaPage {
   const page = Math.max(1, query.page ?? 1);
@@ -314,8 +319,14 @@ export function pageMedia(all: readonly ArrMedia[], query: MediaQuery): MediaPag
     if (search && !media.title.toLowerCase().includes(search)) return false;
     if (query.tagId !== undefined && !media.tags.includes(query.tagId)) return false;
     if (query.rootFolderPath !== undefined) {
-      const root = media.rootFolderPath ?? '';
-      const matchesRoot = root === query.rootFolderPath || media.path.startsWith(query.rootFolderPath);
+      // Separator-aware on purpose: a bare startsWith makes /data/movies match
+      // /data/movies-4k/Title, and this filter picks the ids a re-map moves.
+      const prefix = trimTrailingSlashes(query.rootFolderPath);
+      const target = trimTrailingSlashes(media.path);
+      const matchesRoot =
+        trimTrailingSlashes(media.rootFolderPath ?? '') === prefix ||
+        target === prefix ||
+        target.startsWith(`${prefix}/`);
       if (!matchesRoot) return false;
     }
     return true;

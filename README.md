@@ -111,10 +111,15 @@ UI can say how stale the view is. A successful run invalidates the cache automat
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/api/storage/roots` | Configured roots with writability, device id and free space |
-| `GET` | `/api/storage/list?path=` | One directory (lazy - never a recursive walk) |
+| `GET` | `/api/storage/matrix` | The joined view: one directory level of paths x instances |
 | `GET` | `/api/storage/measure?path=` | Recursive size and file count, cancellable and capped |
 | `POST` | `/api/storage/preflight` | `{ op, payload }` -> checks, warnings and blockers |
-| `GET` | `/api/storage/reconcile?refresh=` | Orphans, missing paths and mapping mismatches |
+
+`/api/storage/matrix` takes a **repeatable** `path` (omit it for the spine: every mount and
+the chain down to each root folder), plus `only=` (a comma list of selectors such as
+`problems`, `candidates`, `rootFolders`), `q=` for a name filter, `limit=`/`offset=` per level,
+`sort=`, and `refresh=true` to re-read the *Arr side. Repeatable `path` is the point:
+re-filtering every open level costs one request, not one per level.
 
 Disk operations are staged through the same `POST /api/queue` as everything else - there is
 no endpoint that mutates the disk directly.
@@ -148,6 +153,10 @@ no endpoint that mutates the disk directly.
 The architectural rule: **there is no instance switcher.** Every view loads every enabled
 instance in parallel and renders them as columns, so parity, gaps and drift are visible in
 one pass and a single action can target many instances at once.
+
+The same rule is why storage is not a separate view: changing a folder on disk and changing
+which instances root at it are one job, so they are one table - see
+[The path matrix](#the-path-matrix).
 
 ### Visual language
 
@@ -186,24 +195,100 @@ Batch actions, all fanning out across the targeted instances:
 Clicking a single cell is the fast path: a gap stages one create, an occupied cell opens
 the delete dialog scoped to that instance.
 
-### Root folder topology
+### The path matrix
 
-Paths down the Y axis, free space per instance in the cells, and a per-instance total in
-the footer. Above the table sits the discrepancy report: paths are grouped by their last
-segment, and a group is flagged when sibling instances disagree about where the same
-library lives - `/data/media/movies` on one, `/media/movies` on another. A group that one
-instance holds *entirely* is not flagged, because that is a deliberate split rather than
-drift.
+`/paths` replaces what used to be two views - a root-folder matrix that could not see the
+disk, and a storage explorer that could not compare instances. Every real task crosses that
+line: renaming a folder means re-pointing root folders, and adding a root folder means the
+folder has to exist. So there is one table.
 
-Re-mapping is the multi-instance staged action:
+**Rows are paths, columns are instances.** The rows form a lazily-expanded tree; the first
+load opens only the *spine* - every mount, and the directory chain down to each *Arr root
+folder. Everything below a root folder starts collapsed, because that is where the library
+lives.
 
-1. create the destination root folder on instances that lack it,
-2. move the media there (`PUT /{movie|series}/editor`), each move depending on its
-   instance's create,
-3. optionally remove the old root folder, depending on that instance's move succeeding.
+**Root folders are leaves.** Below one lies the library - hundreds of media folders this
+view neither manages nor reads. Not expanding them is both the honest scope and the
+performance story: skipping a `readdir` of every root folder cut a 79-root-folder fleet's
+first paint from 2.2s to under a second. What each instance tracks under a root folder is
+still shown, from the index, for free.
 
-`moveFiles` is a deliberate, separate choice with the consequence spelled out in the
-dialog - off means only the assignment changes, on means *Arr physically relocates files.
+Each cell says what one instance believes about one path, in precedence order:
+
+| Role | Meaning |
+|---|---|
+| `rootFolder` | a root folder at exactly this path, with its free space |
+| `tracked` | a media item at exactly this path |
+| `ancestor` | media lives *under* here - the folder's reason to exist |
+| `inside` | inside one of its root folders, tracking nothing here (click to add one) |
+| `outside` | unrelated to its root folders (click to add one) |
+| `unknown` | the instance did not answer - deliberately *not* "missing" |
+
+Row badges are computed server-side so the vocabulary cannot drift: `root folder`,
+**`not a root folder`**, `untracked`, `unmanaged`, `missing`, `not mounted here`, `empty`,
+`symlink`, `no access`, `read-only`. The second of those is the question the view exists to
+answer - a folder sitting alongside your root folders that no instance roots at.
+
+There is deliberately **no parity or drift reporting here**. This view is for reorganising
+and monitoring folders in their own right; comparing a setting across instances and
+aligning it is what the tag and import-list matrices are for. A fleet where each instance
+roots at its own subfolder is a normal layout, and calling all 79 of its root folders
+"drifted" was noise, not information.
+
+Root folders outside `FS_ROOTS`, or absent from disk, are **rows**, not a footnote: the
+first are marked `not mounted here` (with the mapping explanation still shown above the
+table), the second are struck through in their real tree position, at any depth.
+
+`missing` means *an instance holds a file for this path and the disk does not have it*.
+A monitored film nobody has downloaded yet also has a path that does not exist - Radarr
+assigns one up front - and that is not a problem, so those are not rows. Without that
+distinction a healthy 384-film library reported 998 "missing" folders; with it, it
+reports none.
+
+#### A folder that still holds a whole library
+
+The case that prompted this: a folder full of films that is no longer anybody's root
+folder. The table never renders it. Expanding yields one summary row plus only the
+children that need attention:
+
+```
+▾ /data/media/old-movies                          not a root folder · unmanaged
+    Orphan Film (1999)              untracked
+    Gone (2001)                     missing
+  └ showing 3 of 814 folders here · 806 tracked · 4 untracked · 2 missing   [show more]
+```
+
+The summary row states one thing at a time. During a search it says what the search
+matched - `1 of 9 folders here match "onepiece"` - and drops the state counts, because
+those describe entries that are not on screen.
+
+The counts are exact even though the rows are a subset, because they come from one
+`readdir` plus an in-memory index rather than from the rows returned. The rule that makes
+it affordable: **`only`, `q` and `limit` are applied before any per-child `stat`.** A level
+of 64 entries or fewer is served whole and fully probed, exactly like the old explorer; a
+bigger one defaults to problems-only. `empty` and `no access` are the two counts that need
+a read per child, so on a big level they are reported as *not evaluated* (`null`) rather
+than as zero.
+
+#### Depth is where the old scan was wrong
+
+The retired reconcile scan classified only the direct children of a root folder. With a
+nested layout - root folder `/data/media`, films at `/data/media/movies/Dune (2021)` - it
+called `movies` an orphan. The server now keeps an **ancestor closure** over every media
+path (`PathIndexService`), so "does any instance track anything at or under this path" is
+an O(1) answer at any depth. That is also why the join is server-side: the browser would
+need the fleet's whole library to compute it.
+
+Row actions are derived from the roles: `propagate`, `remove` and `re-map` for root
+folders, `align` for anything an instance points at, and `new folder`, `rename`, `move`,
+`prune` for what is on disk. A mount is never renameable, and a prune is only offered when
+nothing anywhere would lose media by it.
+
+**Not offered on purpose:** an align chain for renaming an individual *media* folder.
+`media.moveRootFolder` only sets `rootFolderPath`, and `media.refresh` re-reads each item's
+stored path, so nothing in the current operation set can make *Arr adopt a renamed media
+folder - it would report the item missing. The plain disk rename is offered instead, with a
+warning naming the instances and item counts it would leave dangling.
 
 ### Import list fleet
 
@@ -288,34 +373,15 @@ here, unlike for the SQLite database, which belongs on the cache disk).
 |---|---|
 | Scope | Directories only. No file-level create, rename or delete. |
 | Traversal | Every path is resolved against the configured roots; the parent chain is realpath'd, so a symlink cannot be used to escape. A symlink *leaf* is left unresolved, so "move this link" can never silently move the library behind it. |
-| Symlinks | Shown in the explorer, never followed and never mutated. |
-| Deleting | Hard delete, no recycle bin. Non-empty needs `recursive`; a folder a connected instance still tracks needs `force`; the UI makes you type the folder name. Deleting a storage root or a mount point is refused outright. |
+| Symlinks | Shown in the path matrix, never followed and never mutated. |
+| Deleting | Hard delete, no recycle bin. Non-empty needs `recursive`; a folder a connected instance still tracks needs `force`, and so does one ArrRanger cannot *check* - an unreachable instance is never read as a cleared one; the UI makes you type the folder name. Deleting a storage root or a mount point is refused outright. |
 | Cross-filesystem moves | **Refused.** The preflight compares device ids and reports how much would have to be copied: move it with your own tool (unBALANCE, rsync), then use Reconcile &amp; Align. |
 | Preflight | Runs before staging *and* again immediately before execution, so a staged operation that went stale fails with `fs_precondition_failed` instead of acting on a filesystem nobody reviewed. |
 
-### The storage view
-
-`/storage` is a lazy explorer over the configured roots - it never walks a whole library -
-with the reconciliation report folded in:
-
-- **orphan** - a folder on disk that no connected instance has media at
-- **missing** - a path an instance believes in that is not on disk (shown struck through in
-  the listing where it should have been)
-- **tracked** - matched, with how many instances own it
-- **empty**, **symlink**, **no access**
-
-Recursive size is opt-in per folder. Every mutation is staged, badged in the listing while
-pending, and recorded in the audit trail exactly like an HTTP exchange:
-
-```
-[debug] rename /data/movies -> /data/films (0ms)
-        request: {"from":"/data/movies","to":"/data/films"}
-[info]  Renamed /data/movies to /data/films
-```
-
 ### Reconcile &amp; Align
 
-The headline workflow. Pick a tracked folder, give it a new name, choose which instances to
+The headline workflow, reached from the `align` action on any row in the path matrix that
+an instance points at. Pick a tracked folder, give it a new name, choose which instances to
 realign, and ArrRanger stages one dependent chain:
 
 ```

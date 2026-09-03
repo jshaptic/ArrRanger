@@ -5,15 +5,26 @@ import BaseButton from '@/components/base/BaseButton.vue';
 import BaseModal from '@/components/base/BaseModal.vue';
 import { basename, joinPath, parentOf } from '@/lib/fs-tree';
 import { formatBytes } from '@/lib/format';
-import { useFilesystemStore } from '@/stores/filesystem';
+import { usePathsStore } from '@/stores/paths';
 import { useQueueStore } from '@/stores/queue';
 
 export type DiskOperation = 'mkdir' | 'rename' | 'move' | 'delete';
 
-const props = defineProps<{ operation: DiskOperation; target: string }>();
+const props = withDefaults(
+  defineProps<{
+    operation: DiskOperation;
+    target: string;
+    /**
+     * Instances with media at or under `target`. Optional so every existing call site
+     * keeps working; when given, a relocation says out loud what it would leave behind.
+     */
+    trackedBy?: ReadonlyArray<{ instanceId: number; name: string; mediaCount: number }>;
+  }>(),
+  { trackedBy: () => [] },
+);
 const emit = defineEmits<{ close: [] }>();
 
-const fs = useFilesystemStore();
+const fs = usePathsStore();
 const queue = useQueueStore();
 
 const parent = computed(() => parentOf(props.target) ?? props.target);
@@ -129,6 +140,25 @@ watch([name, destination, recursive, force], () => void check());
 <template>
   <BaseModal :title="TITLES[props.operation]" :subtitle="props.target" width="lg" @close="emit('close')">
     <div class="space-y-4">
+      <!--
+        Relocating a tracked folder is a legitimate move - it is what Reconcile & Align
+        does - but doing it without realigning leaves those paths dangling, so say so
+        before anything is staged.
+      -->
+      <section
+        v-if="trackedBy.length > 0 && (props.operation === 'rename' || props.operation === 'move')"
+        class="rounded-md border border-drift/40 bg-drift/5 px-3 py-2 text-[11px] leading-relaxed text-drift"
+      >
+        <p v-for="owner in trackedBy" :key="owner.instanceId">
+          {{ owner.name }} has {{ owner.mediaCount }} item(s) at or under this folder.
+        </p>
+        <p class="mt-1 text-muted">
+          Moving it here changes the disk only. Use <span class="font-medium text-ink">align</span>
+          instead to rename and re-point the instances in one chain, or re-map them
+          afterwards - otherwise that media will show as missing.
+        </p>
+      </section>
+
       <!-- inputs -->
       <div v-if="props.operation === 'mkdir'" class="space-y-3">
         <label class="block">

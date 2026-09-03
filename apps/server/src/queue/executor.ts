@@ -35,6 +35,12 @@ export interface QueueExecutorDeps {
   readonly logger: FastifyBaseLogger;
   /** Called after a filesystem item succeeds, so cached scans can be dropped. */
   readonly onFilesystemChanged?: () => void;
+  /**
+   * Called after an *Arr item succeeds. Invalidating that instance's snapshots is not
+   * enough on its own: anything that joins *Arr truth to the disk keeps its own cache,
+   * and a root folder created by a run must show up in the next read.
+   */
+  readonly onInstanceChanged?: (instanceId: number) => void;
 }
 
 export interface StartRunOptions {
@@ -333,6 +339,7 @@ export class QueueExecutor {
       if (item.instanceId !== null) {
         // The instance just changed underneath the cached view.
         this.deps.snapshots.invalidate(item.instanceId);
+        this.deps.onInstanceChanged?.(item.instanceId);
       } else {
         // The disk changed: cached sizes and the orphan report are now stale.
         this.deps.filesystem.invalidateMeasurements();

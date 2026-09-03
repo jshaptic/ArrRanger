@@ -90,6 +90,12 @@ export const arrMediaSchema = z.object({
   monitored: z.boolean().default(false),
   tags: z.array(z.number().int()).default([]),
   sizeOnDisk: z.number().optional(),
+  /**
+   * Radarr sets this false for a monitored film nobody has downloaded yet. Such an item
+   * has a `path` that deliberately does not exist, so it must never be reported as a
+   * folder missing from disk.
+   */
+  hasFile: z.boolean().optional(),
   year: z.number().int().optional(),
 });
 export type ArrMedia = z.infer<typeof arrMediaSchema>;

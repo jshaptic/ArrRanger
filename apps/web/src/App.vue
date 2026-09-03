@@ -4,7 +4,7 @@ import { RouterLink, RouterView, useRoute } from 'vue-router';
 import ToastStack from '@/components/base/ToastStack.vue';
 import ExecutionModal from '@/components/staging/ExecutionModal.vue';
 import StagingDrawer from '@/components/staging/StagingDrawer.vue';
-import { useFilesystemStore } from '@/stores/filesystem';
+import { usePathsStore } from '@/stores/paths';
 import { useInstancesStore } from '@/stores/instances';
 import { useMatrixStore } from '@/stores/matrix';
 import { useQueueStore } from '@/stores/queue';
@@ -18,9 +18,8 @@ interface NavItem {
 
 const NAV: readonly NavItem[] = [
   { to: '/tags', label: 'Tag parity', hint: 'fleet-wide tag matrix' },
-  { to: '/root-folders', label: 'Root folders', hint: 'path topology & drift' },
+  { to: '/paths', label: 'Paths', hint: 'root folders & storage in one matrix' },
   { to: '/import-lists', label: 'Import lists', hint: 'settings comparison' },
-  { to: '/storage', label: 'Storage', hint: 'folders on disk & drift' },
   { to: '/queue', label: 'Queue', hint: 'staged operations' },
   { to: '/instances', label: 'Instances', hint: 'connections' },
 ];
@@ -30,24 +29,23 @@ const ui = useUiStore();
 const instances = useInstancesStore();
 const matrix = useMatrixStore();
 const queue = useQueueStore();
-const filesystem = useFilesystemStore();
+const paths = usePathsStore();
 
 const title = computed(() => route.meta.title ?? 'ArrRanger');
 const hint = computed(() => route.meta.hint ?? '');
 
 onMounted(async () => {
   await instances.load();
-  await Promise.all([matrix.load(), queue.load(), filesystem.loadRoots()]);
-  if (filesystem.enabled) await filesystem.loadReport();
+  await Promise.all([matrix.load(), queue.load(), paths.load()]);
   if (queue.staged.length > 0) ui.openDrawer();
 });
 
-// A run that touched the disk invalidates both the listings and the orphan report.
+// A finished run invalidates the joined view: the disk, the root folders, or both.
 watch(
   () => queue.activeRun?.status,
   (status, previous) => {
-    if (previous === 'running' && status !== 'running' && filesystem.enabled) {
-      void filesystem.refreshAll();
+    if (previous === 'running' && status !== 'running' && paths.enabled) {
+      void paths.refreshAll();
     }
   },
 );
@@ -84,11 +82,11 @@ watch(
             {{ queue.staged.length }}
           </span>
           <span
-            v-if="item.to === '/storage' && filesystem.orphanCount + filesystem.missingCount > 0"
+            v-if="item.to === '/paths' && paths.problemCount > 0"
             class="ml-1 rounded-full border border-drift/50 bg-drift/10 px-1.5 text-[10px] text-drift"
-            title="Orphaned folders on disk plus *Arr paths that do not exist"
+            title="Untracked folders, *Arr paths that do not exist, and root folders this container cannot see"
           >
-            {{ filesystem.orphanCount + filesystem.missingCount }}
+            {{ paths.problemCount }}
           </span>
         </RouterLink>
       </nav>

@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { after, before, describe, test } from 'node:test';
-import type { InstanceWithKey } from '@arrranger/shared';
-import { ArrClient } from '../arr/client.js';
+import type { ArrMedia, InstanceWithKey } from '@arrranger/shared';
+import { ArrClient, pageMedia } from '../arr/client.js';
 import { ArrDispatcherPool } from '../arr/http.js';
 import { ArrApiError } from '../lib/errors.js';
 import { startFakeArr, serverApiKey, type FakeArrServer } from './fake-arr.js';
@@ -182,5 +182,61 @@ describe('ArrClient', () => {
     const detail = await clientFor(radarr).getTagDetail(1);
     assert.equal(detail.view.label, 'hd');
     assert.deepEqual(detail.view.movieIds, [10, 11]);
+  });
+});
+
+describe('pageMedia', () => {
+  /** A library where two root folders share a prefix - the trap this guards. */
+  const library: ArrMedia[] = [
+    { id: 1, title: 'Heat', path: '/data/movies', qualityProfileId: 0, monitored: true, tags: [] },
+    { id: 2, title: 'Dune', path: '/data/movies/Dune (2021)', qualityProfileId: 0, monitored: true, tags: [] },
+    { id: 3, title: 'Arrival', path: '/data/movies-4k/Arrival (2016)', qualityProfileId: 0, monitored: true, tags: [] },
+    { id: 4, title: 'Tenet', path: '/data/movies-4k', qualityProfileId: 0, monitored: true, tags: [] },
+  ];
+
+  test('a root folder never captures a sibling that merely shares its prefix', () => {
+    const page = pageMedia(library, { rootFolderPath: '/data/movies' });
+
+    assert.deepEqual(
+      page.items.map((item) => item.id),
+      [1, 2],
+      'movies-4k items must not be re-mapped along with movies',
+    );
+    assert.equal(page.totalItems, 2);
+  });
+
+  test('matches the root folder itself and everything under it', () => {
+    const under = pageMedia(library, { rootFolderPath: '/data/movies-4k' });
+    assert.deepEqual(
+      under.items.map((item) => item.id),
+      [3, 4],
+    );
+  });
+
+  test('a trailing slash on the query does not change the result', () => {
+    assert.equal(pageMedia(library, { rootFolderPath: '/data/movies/' }).totalItems, 2);
+  });
+
+  test("falls back to the item's own rootFolderPath when its path is elsewhere", () => {
+    const moved: ArrMedia[] = [
+      {
+        id: 9,
+        title: 'Relocated',
+        path: '/elsewhere/Relocated (2019)',
+        rootFolderPath: '/data/movies',
+        qualityProfileId: 0,
+        monitored: true,
+        tags: [],
+      },
+    ];
+
+    assert.equal(pageMedia(moved, { rootFolderPath: '/data/movies' }).totalItems, 1);
+  });
+
+  test('totalItems counts every match, not just the current page', () => {
+    const page = pageMedia(library, { rootFolderPath: '/data/movies', pageSize: 1, page: 1 });
+    assert.equal(page.items.length, 1);
+    assert.equal(page.totalItems, 2);
+    assert.equal(page.totalPages, 2);
   });
 });

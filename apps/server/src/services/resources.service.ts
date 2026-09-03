@@ -129,8 +129,8 @@ export class ResourcesService {
   }
 
   /**
-   * The whole cached library, unpaged. The reconcile service needs every path at once to
-   * decide what on disk is orphaned - paging that would be pointless work.
+   * The whole cached library, unpaged. The path index needs every path at once to build
+   * its ancestor closure - paging that would be pointless work.
    */
   async mediaLibrary(
     instanceId: number,
@@ -145,6 +145,30 @@ export class ResourcesService {
       (raw) => arrMediaSchema.parse(raw),
     );
     return { items: media.payload, fetchedAt: media.fetchedAt };
+  }
+
+  /**
+   * Cached snapshots only, parsed - null when nothing is cached.
+   *
+   * The safety guards read through these: a preflight that phoned an *Arr instance
+   * could hang or fail for reasons that have nothing to do with the disk, so it must
+   * never turn a cache miss into a request.
+   */
+  peekMediaLibrary(instanceId: number): readonly ArrMedia[] | null {
+    return this.peek(instanceId, 'media', (raw) => arrMediaSchema.parse(raw));
+  }
+
+  peekRootFolders(instanceId: number): readonly ArrRootFolder[] | null {
+    return this.peek(instanceId, 'rootFolder', (raw) => arrRootFolderSchema.parse(raw));
+  }
+
+  private peek<T>(
+    instanceId: number,
+    resource: SnapshotResource,
+    parse: (raw: ArrJson) => T,
+  ): readonly T[] | null {
+    const snapshot = this.deps.snapshots.get<ArrJson[]>(instanceId, resource);
+    return snapshot === null ? null : snapshot.payload.map(parse);
   }
 
   /** Cached root folders only - no request when a snapshot exists. */

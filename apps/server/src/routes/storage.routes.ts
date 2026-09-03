@@ -1,12 +1,12 @@
 import {
   FS_OPS,
+  PATH_SELECTORS,
   queuePayloadSchemas,
-  type FsListResponse,
   type FsMeasurement,
   type FsOp,
   type FsPreflight,
   type FsRootsResponse,
-  type ReconcileReport,
+  type PathMatrixResponse,
 } from '@arrranger/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
@@ -17,7 +17,21 @@ const measureQuery = pathQuery.extend({
   maxEntries: z.coerce.number().int().min(100).max(1_000_000).optional(),
 });
 
-const refreshQuery = z.object({
+/** Repeatable `path`: refetching every expanded level is one request, not one per level. */
+const matrixQuery = z.object({
+  path: z
+    .union([z.string(), z.array(z.string())])
+    .optional()
+    .transform((value) => (value === undefined ? [] : Array.isArray(value) ? value : [value])),
+  only: z
+    .string()
+    .optional()
+    .transform((value) => (value === undefined ? undefined : value.split(',')))
+    .pipe(z.array(z.enum(PATH_SELECTORS)).nonempty().optional()),
+  q: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(1000).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
+  sort: z.enum(['name', 'interesting', 'modified']).optional(),
   refresh: z
     .enum(['true', 'false'])
     .optional()
@@ -35,11 +49,6 @@ const preflightBody = z.object({
  */
 export const storageRoutes: FastifyPluginAsync = async (app) => {
   app.get('/storage/roots', async (): Promise<FsRootsResponse> => app.ctx.filesystem.roots());
-
-  app.get('/storage/list', async (request): Promise<FsListResponse> => {
-    const { path } = pathQuery.parse(request.query);
-    return app.ctx.filesystem.list(path);
-  });
 
   /** Recursive size: opt-in, cancellable, and capped - it can take minutes on an array. */
   app.get('/storage/measure', async (request): Promise<FsMeasurement> => {
@@ -61,8 +70,22 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
     return app.ctx.filesystem.preflight(op, payload);
   });
 
-  app.get('/storage/reconcile', async (request): Promise<ReconcileReport> => {
-    const { refresh } = refreshQuery.parse(request.query);
-    return app.ctx.reconcile.report({ refresh });
+  /**
+   * The joined view: disk truth and *Arr truth, one directory level at a time.
+   *
+   * Omit `path` for the spine - every mount and the chain down to each root folder.
+   */
+  app.get('/storage/matrix', async (request): Promise<PathMatrixResponse> => {
+    const query = matrixQuery.parse(request.query);
+
+    return app.ctx.pathMatrix.matrix({
+      paths: query.path,
+      ...(query.only === undefined ? {} : { only: query.only }),
+      ...(query.q === undefined ? {} : { filter: query.q }),
+      ...(query.limit === undefined ? {} : { limit: query.limit }),
+      ...(query.offset === undefined ? {} : { offset: query.offset }),
+      ...(query.sort === undefined ? {} : { sort: query.sort }),
+      refresh: query.refresh,
+    });
   });
 };

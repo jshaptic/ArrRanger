@@ -9,22 +9,19 @@ const routes: RouteRecordRaw[] = [
     meta: { title: 'Tag parity matrix', hint: 'every tag, every instance, side by side' },
   },
   {
-    path: '/root-folders',
-    name: 'root-folders',
-    component: () => import('@/views/RootFolderTopologyView.vue'),
-    meta: { title: 'Root folder topology', hint: 'paths, free space and mount-point drift' },
+    path: '/paths',
+    name: 'paths',
+    component: () => import('@/views/PathMatrixView.vue'),
+    meta: { title: 'Path matrix', hint: 'every folder, every instance, one table' },
   },
+  // The two views this replaced - keep the links working.
+  { path: '/root-folders', redirect: '/paths' },
+  { path: '/storage', redirect: '/paths' },
   {
     path: '/import-lists',
     name: 'import-lists',
     component: () => import('@/views/ImportListFleetView.vue'),
     meta: { title: 'Import list fleet', hint: 'compare and align list settings' },
-  },
-  {
-    path: '/storage',
-    name: 'storage',
-    component: () => import('@/views/StorageExplorerView.vue'),
-    meta: { title: 'Storage', hint: 'folders on disk, and what *Arr thinks of them' },
   },
   {
     path: '/queue',

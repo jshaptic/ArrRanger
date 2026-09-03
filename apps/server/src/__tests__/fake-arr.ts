@@ -32,6 +32,8 @@ export interface FakeMedia {
   tags: number[];
   year: number;
   sizeOnDisk: number;
+  /** False for a monitored item nobody has downloaded - its path is meant not to exist. */
+  hasFile?: boolean;
   /** An extra field the client must preserve but never parses. */
   images: Array<{ coverType: string; remoteUrl: string }>;
 }

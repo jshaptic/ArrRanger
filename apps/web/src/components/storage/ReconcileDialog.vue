@@ -5,7 +5,7 @@ import BaseButton from '@/components/base/BaseButton.vue';
 import BaseModal from '@/components/base/BaseModal.vue';
 import { resourcesApi } from '@/api/resources';
 import { basename, joinPath, parentOf } from '@/lib/fs-tree';
-import { useFilesystemStore } from '@/stores/filesystem';
+import { usePathsStore } from '@/stores/paths';
 import { useInstancesStore } from '@/stores/instances';
 import { useMatrixStore } from '@/stores/matrix';
 import { useQueueStore } from '@/stores/queue';
@@ -13,7 +13,7 @@ import { useQueueStore } from '@/stores/queue';
 const props = defineProps<{ path: string }>();
 const emit = defineEmits<{ close: [] }>();
 
-const fs = useFilesystemStore();
+const fs = usePathsStore();
 const matrix = useMatrixStore();
 const instances = useInstancesStore();
 const queue = useQueueStore();

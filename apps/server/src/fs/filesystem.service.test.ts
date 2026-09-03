@@ -10,7 +10,7 @@ import { PathGuard } from './paths.js';
 async function makeService(roots: string[], references: readonly number[] = []): Promise<FilesystemService> {
   const guard = await PathGuard.create(roots);
   const service = new FilesystemService(guard);
-  service.setReferenceLookup(async () => references);
+  service.setReferenceLookup(async () => ({ instanceIds: references, complete: true }));
   return service;
 }
 
@@ -227,6 +227,58 @@ describe('FilesystemService', () => {
     const result = await fs.remove({ path: target, recursive: true, force: false });
     assert.equal(result.freedBytes, 2048);
     assert.throws(() => statSync(target));
+  });
+
+  test('warns, but does not refuse, when a relocation moves a folder an instance points at', async () => {
+    const tracked = await makeService([root], [7]);
+
+    const preflight = await tracked.preflight('fs.rename', {
+      from: path.join(root, 'movies'),
+      to: path.join(root, 'films'),
+    });
+
+    // Reconcile & Align relocates tracked folders on purpose - this must never block.
+    assert.equal(preflight.ok, true);
+    assert.deepEqual(preflight.referencedBy, [7]);
+    const check = preflight.checks.find((entry) => entry.id === 'referenced_by_arr');
+    assert.equal(check?.status, 'warning');
+    assert.match(check?.message ?? '', /1 connected instance/);
+  });
+
+  test('says so plainly when no instance points at a folder being relocated', async () => {
+    const preflight = await fs.preflight('fs.rename', {
+      from: path.join(root, 'movies'),
+      to: path.join(root, 'films'),
+    });
+
+    const check = preflight.checks.find((entry) => entry.id === 'referenced_by_arr');
+    assert.equal(check?.status, 'ok');
+    assert.deepEqual(preflight.referencedBy, []);
+  });
+
+  test('refuses a delete it cannot check, rather than assuming nothing owns the folder', async () => {
+    const guard = await PathGuard.create([root]);
+    const blind = new FilesystemService(guard);
+    // An instance exists but nothing about it is cached: "unknown" is not "cleared".
+    blind.setReferenceLookup(async () => ({ instanceIds: [], complete: false }));
+
+    const refused = await blind.preflight('fs.delete', {
+      path: path.join(root, 'movies', 'Arrival (2016)'),
+      recursive: true,
+      force: false,
+    });
+
+    assert.equal(refused.ok, false);
+    const check = refused.checks.find((entry) => entry.id === 'referenced_by_arr');
+    assert.equal(check?.status, 'blocker');
+    assert.match(check?.message ?? '', /cannot tell/);
+
+    const forced = await blind.preflight('fs.delete', {
+      path: path.join(root, 'movies', 'Arrival (2016)'),
+      recursive: true,
+      force: true,
+    });
+    assert.equal(forced.ok, true, 'force is the deliberate override');
   });
 
   test('refuses to delete a folder an instance still references, unless forced', async () => {

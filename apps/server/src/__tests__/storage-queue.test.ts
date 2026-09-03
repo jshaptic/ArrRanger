@@ -3,13 +3,12 @@ import { chmodSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import type {
-  FsListResponse,
   FsPreflight,
   FsRootsResponse,
   InstanceResponse,
   QueueItem,
   QueueListResponse,
-  ReconcileReport,
+  PathMatrixResponse,
   RunResponse,
 } from '@arrranger/shared';
 import { serverApiKey, startFakeArr, type FakeArrServer } from './fake-arr.js';
@@ -108,47 +107,11 @@ describe('filesystem operations in the unified queue', () => {
     assert.ok((roots.body.roots[0]?.freeSpace ?? 0) > 0);
   });
 
-  test('lists a directory and refuses to leave the roots', async () => {
-    const listing = await api<FsListResponse>(
-      server.url,
-      `/storage/list?path=${encodeURIComponent(movies())}`,
-    );
-    assert.deepEqual(
-      listing.body.entries.map((entry) => entry.name),
-      ['Arrival (2016)', 'Empty Folder', 'Orphan Film (1999)'],
-    );
-
-    const escape = await api<ErrorBody>(server.url, '/storage/list?path=%2Fetc');
-    assert.equal(escape.status, 403);
-    assert.equal(escape.body.error.code, 'fs_forbidden_path');
-
-    const traversal = await api<ErrorBody>(
-      server.url,
-      `/storage/list?path=${encodeURIComponent(`${movies()}/../../..`)}`,
-    );
-    assert.equal(traversal.status, 403);
-  });
-
-  test('classifies what is on disk against what the instance knows', async () => {
-    const report = await api<ReconcileReport>(server.url, '/storage/reconcile?refresh=true');
-    const byName = new Map(report.body.entries.map((entry) => [entry.name, entry]));
-
-    assert.equal(byName.get('Arrival (2016)')?.state, 'matched');
-    assert.deepEqual(byName.get('Arrival (2016)')?.instanceIds, [instanceId]);
-    assert.equal(byName.get('Orphan Film (1999)')?.state, 'orphan');
-    assert.equal(byName.get('Empty Folder')?.state, 'empty');
-
-    // The instance believes in a folder that is not there.
-    const missing = report.body.missing.find((entry) => entry.path.includes('Gone Missing'));
-    assert.equal(missing?.kind, 'media');
-    assert.equal(missing?.title, 'Gone Missing');
-
-    assert.deepEqual(report.body.mismatches, []);
-    assert.equal(report.body.counts.orphan, 1);
-    assert.equal(report.body.counts.missing, 1);
-  });
-
   test('preflight explains a refusal before anything is staged', async () => {
+    // The guard reads cached snapshots only, so warm the cache first. Without this the
+    // honest answer is "I cannot tell", which the next test covers.
+    await api<PathMatrixResponse>(server.url, '/storage/matrix?refresh=true');
+
     const refused = await api<FsPreflight>(server.url, '/storage/preflight', {
       method: 'POST',
       body: {
@@ -398,6 +361,37 @@ describe('filesystem operations in the unified queue', () => {
       fileCount: 1,
     });
   });
+
+  test('a root folder created by a run is visible on the next read, not 30s later', async () => {
+    await api(server.url, '/queue', { method: 'DELETE' });
+    const added = path.join(media, 'audiobooks');
+    mkdirSync(added, { recursive: true });
+
+    const rootFolderPaths = async (): Promise<number> =>
+      (await api<PathMatrixResponse>(server.url, '/storage/matrix')).body.totals.rootFolderPaths;
+
+    // Populate the cache first - that is what used to go stale.
+    const before = await rootFolderPaths();
+
+    await api(server.url, '/queue', {
+      method: 'POST',
+      body: { instanceId, op: 'rootFolder.create', payload: { path: added } },
+    });
+    const started = await api<RunResponse>(server.url, '/queue/runs', { method: 'POST', body: {} });
+    const finished = await waitFor(
+      () => api<RunResponse>(server.url, `/queue/runs/${started.body.run.id}`).then((r) => r.body),
+      (snapshot) => snapshot.run.finishedAt !== null,
+      { label: 'root folder create run' },
+    );
+    assert.equal(finished.run.status, 'completed');
+
+    // No ?refresh: an *Arr item has to invalidate the joined view on its own.
+    assert.equal(
+      await rootFolderPaths(),
+      before + 1,
+      'the joined view still served a pre-run cache',
+    );
+  });
 });
 
 describe('storage with no roots configured', () => {
@@ -419,7 +413,7 @@ describe('storage with no roots configured', () => {
     assert.equal(roots.body.enabled, false);
     assert.deepEqual(roots.body.roots, []);
 
-    const listing = await api<ErrorBody>(server.url, '/storage/list?path=%2Fdata');
+    const listing = await api<ErrorBody>(server.url, '/storage/measure?path=%2Fdata');
     assert.equal(listing.status, 503);
     assert.equal(listing.body.error.code, 'fs_disabled');
     assert.match(listing.body.error.message, /FS_ROOTS/);

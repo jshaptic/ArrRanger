@@ -1,5 +1,6 @@
 node_modules/
 dist/
+*.tsbuildinfo
 .config-dev/
 *.sqlite
 *.sqlite-shm

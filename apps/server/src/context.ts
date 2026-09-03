@@ -11,7 +11,8 @@ import { QueueRepository } from './repositories/queue.repo.js';
 import { RunsRepository } from './repositories/runs.repo.js';
 import { SnapshotsRepository } from './repositories/snapshots.repo.js';
 import { InstancesService } from './services/instances.service.js';
-import { ReconcileService } from './services/reconcile.service.js';
+import { PathIndexService } from './services/path-index.service.js';
+import { PathMatrixService } from './services/path-matrix.service.js';
 import { ResourcesService } from './services/resources.service.js';
 
 /** Composition root: one place where every dependency is wired. */
@@ -28,7 +29,8 @@ export interface AppContext {
   readonly instances: InstancesService;
   readonly resources: ResourcesService;
   readonly filesystem: FilesystemService;
-  readonly reconcile: ReconcileService;
+  readonly pathIndex: PathIndexService;
+  readonly pathMatrix: PathMatrixService;
   shutdown(): Promise<void>;
 }
 
@@ -51,11 +53,12 @@ export async function createContext(params: {
 
   const instances = new InstancesService({ instances: instancesRepo, snapshots, dispatchers });
   const resources = new ResourcesService({ instances: instancesRepo, snapshots, dispatchers });
-  const reconcile = new ReconcileService({ instances: instancesRepo, resources, filesystem });
+  const pathIndex = new PathIndexService({ instances: instancesRepo, resources });
+  const pathMatrix = new PathMatrixService({ index: pathIndex, filesystem });
 
-  // The delete guard asks *Arr what it still owns; the reconcile service needs the
-  // filesystem to scan. Wiring the lookup after construction breaks the cycle.
-  filesystem.setReferenceLookup(reconcile.referencedBy);
+  // The safety guards ask *Arr what it still owns. The index answers from cached
+  // snapshots alone and never touches the disk, so there is no cycle to break here.
+  filesystem.setReferenceLookup(pathIndex.referencedBy);
 
   const executor = new QueueExecutor({
     instances: instancesRepo,
@@ -66,7 +69,10 @@ export async function createContext(params: {
     dispatchers,
     events,
     logger,
-    onFilesystemChanged: () => reconcile.invalidate(),
+    onFilesystemChanged: () => pathIndex.invalidate(),
+    // An *Arr change invalidates the joined view too - a root folder a run just
+    // created has to be visible in the next read, not 30 seconds later.
+    onInstanceChanged: () => pathIndex.invalidate(),
   });
 
   for (const root of filesystem.roots().roots) {
@@ -99,7 +105,8 @@ export async function createContext(params: {
     instances,
     resources,
     filesystem,
-    reconcile,
+    pathIndex,
+    pathMatrix,
     async shutdown() {
       // Let the in-flight queue item finish before sockets go away.
       await executor.waitForIdle();

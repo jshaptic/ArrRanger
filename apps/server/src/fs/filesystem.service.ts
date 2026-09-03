@@ -12,6 +12,7 @@ import type {
   QueuePayloadFor,
 } from '@arrranger/shared';
 import { FsError } from '../lib/errors.js';
+import type { PathReferences } from '../services/path-index.service.js';
 import {
   ACCESS_READ,
   ACCESS_WRITE,
@@ -35,7 +36,10 @@ export interface FsTrace {
 export type FsTraceSink = (trace: FsTrace) => void;
 
 /** Instances whose database references a path - injected to avoid a circular dependency. */
-export type PathReferenceLookup = (target: string) => Promise<readonly number[]>;
+export type PathReferenceLookup = (
+  target: string,
+  options?: { allowFetch?: boolean },
+) => Promise<PathReferences>;
 
 export interface MeasureOptions {
   readonly signal?: AbortSignal;
@@ -76,7 +80,7 @@ function formatBytes(bytes: number): string {
  * because the disk can change between staging and Apply All.
  */
 export class FilesystemService {
-  private references: PathReferenceLookup = async () => [];
+  private references: PathReferenceLookup = async () => ({ instanceIds: [], complete: true });
   private readonly measurements = new Map<string, { at: number; value: FsMeasurement }>();
 
   constructor(
@@ -84,7 +88,7 @@ export class FilesystemService {
     private readonly onTrace: FsTraceSink = () => {},
   ) {}
 
-  /** Wired after construction: the reconcile service needs this service to scan. */
+  /** Wired after construction so the guards can ask what *Arr still points at. */
   setReferenceLookup(lookup: PathReferenceLookup): void {
     this.references = lookup;
   }
@@ -251,6 +255,15 @@ export class FilesystemService {
     return value;
   }
 
+  /**
+   * A measurement taken earlier, or null. The matrix reads sizes through this so a row
+   * can show one without ever starting a walk of its own.
+   */
+  cachedMeasurement(target: string): FsMeasurement | null {
+    const cached = this.measurements.get(target);
+    return cached !== undefined && Date.now() - cached.at < 60_000 ? cached.value : null;
+  }
+
   invalidateMeasurements(): void {
     this.measurements.clear();
   }
@@ -386,7 +399,33 @@ export class FilesystemService {
       checks.push(blocker('source_parent_writable', `No write permission on ${fromParent}`));
     }
 
-    return this.finish(op, checks, { freeSpace: await freeSpaceAt(toParentStats.exists ? toParent : from) });
+    // A warning, never a blocker: relocating a tracked folder is exactly what
+    // Reconcile & Align does on purpose. But moving one *without* realigning leaves
+    // those paths dangling, so the decision has to be visible before it is staged.
+    // A hint, not a gate - so it never makes a staged rename depend on a live instance.
+    const references = await this.references(from, { allowFetch: false });
+    if (references.instanceIds.length > 0) {
+      checks.push(
+        warning(
+          'referenced_by_arr',
+          `${String(references.instanceIds.length)} connected instance(s) still point at this path - realign them afterwards, or their media will go missing`,
+        ),
+      );
+    } else if (!references.complete) {
+      checks.push(
+        warning(
+          'referenced_by_arr',
+          'Could not check every instance for media at this path - refresh the fleet to be sure',
+        ),
+      );
+    } else {
+      checks.push(ok('referenced_by_arr', 'No connected instance points at this path'));
+    }
+
+    return this.finish(op, checks, {
+      freeSpace: await freeSpaceAt(toParentStats.exists ? toParent : from),
+      referencedBy: references.instanceIds,
+    });
   }
 
   private async preflightDelete(payload: QueuePayloadFor<'fs.delete'>): Promise<FsPreflight> {
@@ -430,7 +469,10 @@ export class FilesystemService {
       }
     }
 
-    const referencedBy = await this.references(target);
+    // A blocker: worth a read to get right.
+    const references = await this.references(target, { allowFetch: true });
+    const referencedBy = references.instanceIds;
+
     if (referencedBy.length > 0) {
       checks.push(
         payload.force
@@ -441,6 +483,19 @@ export class FilesystemService {
           : blocker(
               'referenced_by_arr',
               `${String(referencedBy.length)} connected instance(s) still have media at this path - remove it there first, or force the deletion`,
+            ),
+      );
+    } else if (!references.complete) {
+      // Fail safe: an unchecked instance is not a cleared one.
+      checks.push(
+        payload.force
+          ? warning(
+              'referenced_by_arr',
+              'Could not check every instance for media at this path - forced',
+            )
+          : blocker(
+              'referenced_by_arr',
+              'ArrRanger has no cached view of every instance, so it cannot tell whether one still has media here - refresh the fleet first, or force the deletion',
             ),
       );
     } else {
