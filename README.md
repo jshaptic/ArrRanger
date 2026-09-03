@@ -70,6 +70,8 @@ Deployment notes:
 | `ARRRANGER_SECRET` | *(generated)* | Key material for encrypting stored *Arr API keys |
 | `LOG_LEVEL` | `info` | `fatal` \| `error` \| `warn` \| `info` \| `debug` \| `trace` |
 | `FS_ROOTS` | *(empty)* | Storage roots ArrRanger may inspect and modify, colon-separated. Empty disables all filesystem operations. |
+| `FS_LOW_SPACE_BYTES` | `50GiB` | A filesystem below this free space is flagged low. Accepts units: `50G`, `500MiB`, or a plain byte count. `0` disables. |
+| `FS_LOW_SPACE_PERCENT` | `0` | Also flag below this percentage free, OR'd with the floor above. Off by default - a ratio is loud on a large array. |
 | `TZ` | `Etc/UTC` | Container timezone |
 | `PUID` / `PGID` | `99` / `100` | User the process runs as |
 | `UMASK` | `002` | File creation mask - 002 keeps new folders group-writable for the *Arr containers |
@@ -78,89 +80,24 @@ Deployment notes:
 | `WEB_ROOT` | *(bundled)* | Override the static SPA directory |
 | `MIGRATIONS_DIR` | *(bundled)* | Override the migrations directory |
 
-## API
-
-Everything lives under `/api`. Errors always come back as
-`{ "error": { "code", "message", "details?" } }`.
-
-### Instances
-
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/api/instances` | List instances (never includes the API key) |
-| `POST` | `/api/instances` | Create; probes the instance and returns `{ instance, test }` |
-| `GET` | `/api/instances/:id` | One instance |
-| `PATCH` | `/api/instances/:id` | Update; re-probes and drops cached data when the connection changed |
-| `DELETE` | `/api/instances/:id` | Remove instance, queue items and snapshots (FK cascade) |
-| `POST` | `/api/instances/:id/test` | Re-probe a stored instance |
-| `POST` | `/api/instances/test` | Probe credentials that have not been saved |
-
-### Resources
-
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/api/instances/:id/resources?refresh=` | Tags (with attachment counts), root folders, import lists |
-| `GET` | `/api/instances/:id/media?page=&pageSize=&search=&tagId=&rootFolderPath=&refresh=` | Paged media |
-| `POST` | `/api/instances/:id/refresh` | Drop the cached snapshot |
-
-Reads are served from `resource_snapshots` and every response carries `fetchedAt`, so the
-UI can say how stale the view is. A successful run invalidates the cache automatically.
-
-### Storage
-
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/api/storage/roots` | Configured roots with writability, device id and free space |
-| `GET` | `/api/storage/matrix` | The joined view: one directory level of paths x instances |
-| `GET` | `/api/storage/measure?path=` | Recursive size and file count, cancellable and capped |
-| `POST` | `/api/storage/preflight` | `{ op, payload }` -> checks, warnings and blockers |
-
-`/api/storage/matrix` takes a **repeatable** `path` (omit it for the spine: every mount and
-the chain down to each root folder), plus `only=` (a comma list of selectors such as
-`problems`, `candidates`, `rootFolders`), `q=` for a name filter, `limit=`/`offset=` per level,
-`sort=`, and `refresh=true` to re-read the *Arr side. Repeatable `path` is the point:
-re-filtering every open level costs one request, not one per level.
-
-Disk operations are staged through the same `POST /api/queue` as everything else - there is
-no endpoint that mutates the disk directly.
-
-### Queue
-
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/api/queue?status=&instanceId=` | Staged items plus the active run |
-| `POST` | `/api/queue` | Stage one item, an array, or `{ items: [...] }` - atomic |
-| `GET` | `/api/queue/:id` | One item with its full *Arr request/response audit trail |
-| `PATCH` | `/api/queue/reorder` | `{ itemIds }` - must list every pending item exactly once |
-| `POST` | `/api/queue/:id/retry` | Put a failed item back to `pending` |
-| `DELETE` | `/api/queue/:id` | Remove a staged item |
-| `DELETE` | `/api/queue?statuses=` | Clear finished items (default: succeeded, failed, skipped, cancelled) |
-
-### Runs
-
-| Method | Path | Purpose |
-|---|---|---|
-| `POST` | `/api/queue/runs` | Apply All - `{ onError?, itemIds? }`, returns `202` |
-| `GET` | `/api/queue/runs` | Recent runs |
-| `GET` | `/api/queue/runs/:id` | Run state plus its items |
-| `GET` | `/api/queue/runs/:id/stream` | SSE progress - see below |
-| `GET` | `/api/queue/runs/:id/events?sinceId=` | Polling alternative to SSE |
-| `POST` | `/api/queue/runs/:id/resume` | Continue a paused run - `{ retryFailed?, skipFailed? }` |
-| `POST` | `/api/queue/runs/:id/cancel` | Abort the in-flight step and stand down the rest |
-
 ## The fleet views
 
 The architectural rule: **there is no instance switcher.** Every view loads every enabled
-instance in parallel and renders them as columns, so parity, gaps and drift are visible in
-one pass and a single action can target many instances at once.
+instance in parallel, so parity, gaps and drift are visible in one pass and a single action
+can target many instances at once.
 
-The same rule is why storage is not a separate view: changing a folder on disk and changing
-which instances root at it are one job, so they are one table - see
-[The path matrix](#the-path-matrix).
+For tags and import lists that means instances *are* the X axis: the same tag genuinely
+exists on many instances, and comparing it is the whole point. Folders are not like that -
+one folder belongs to one instance - so `/paths` keeps the fleet-wide load and drops the
+axis; see [The folder view](#the-folder-view).
+
+The rule is also why storage is not a separate view: changing a folder on disk and changing
+which instances root at it are one job, so they are one table.
 
 ### Visual language
 
-The same five states are used everywhere - nothing else carries meaning:
+In the matrices - tags and import lists - the same five cell states are used, and nothing
+else carries meaning:
 
 | Cue | Meaning |
 |---|---|
@@ -173,6 +110,11 @@ The same five states are used everywhere - nothing else carries meaning:
 An unreachable instance is never rendered as a configuration gap, and batch actions skip
 it. That distinction is enforced in `buildTagRows`/`buildRootFolderRows` (`cell.known`) and
 covered by tests.
+
+The folder view has no cells to colour, so it carries the same invariant differently: an
+instance that did not answer is absent from every row's owners, and the view says so once,
+above the table, rather than in a `?` per row. Amber and red survive as a per-row
+**severity** glyph.
 
 ### Tag parity matrix
 
@@ -195,17 +137,32 @@ Batch actions, all fanning out across the targeted instances:
 Clicking a single cell is the fast path: a gap stages one create, an occupied cell opens
 the delete dialog scoped to that instance.
 
-### The path matrix
+### The folder view
 
 `/paths` replaces what used to be two views - a root-folder matrix that could not see the
 disk, and a storage explorer that could not compare instances. Every real task crosses that
 line: renaming a folder means re-pointing root folders, and adding a root folder means the
 folder has to exist. So there is one table.
 
-**Rows are paths, columns are instances.** The rows form a lazily-expanded tree; the first
-load opens only the *spine* - every mount, and the directory chain down to each *Arr root
-folder. Everything below a root folder starts collapsed, because that is where the library
-lives.
+**Rows are folders.** A folder is managed and monitored in its own right, and the instances
+that use it are a column - not the axis. That is the one place the fleet's column layout is
+deliberately dropped, because a folder is essentially never reused by two instances: each
+roots at its own subtree, so an instance axis would be N columns of dashes to express the
+single fact that Radarr owns this one. The width goes to disk facts and health instead:
+
+```
+Path                    Used by      Media   Size     Modified   Free      State
+▾ /data                  ● Radarr     496     —        —          1.2 TB
+  ▾ media                ● Sonarr
+    ▸ movies             ● Radarr     384     2.1 TB   2d ago     1.2 TB    root folder
+    ▸ movies-4k          ● Radarr-4K  112     900 GB   5h ago     1.2 TB    root folder
+  ⚠ ▸ old-movies         —            814     1.4 TB   3mo ago    1.2 TB    not a root folder · unmanaged
+    ▸ tv                 ● Sonarr     220     3.0 TB   1h ago     1.2 TB    root folder
+```
+
+The rows form a lazily-expanded tree; the first load opens only the *spine* - every mount,
+and the directory chain down to each *Arr root folder. Everything below a root folder starts
+collapsed, because that is where the library lives.
 
 **Root folders are leaves.** Below one lies the library - hundreds of media folders this
 view neither manages nor reads. Not expanding them is both the honest scope and the
@@ -213,21 +170,47 @@ performance story: skipping a `readdir` of every root folder cut a 79-root-folde
 first paint from 2.2s to under a second. What each instance tracks under a root folder is
 still shown, from the index, for free.
 
-Each cell says what one instance believes about one path, in precedence order:
+#### Used by
 
-| Role | Meaning |
+An owner chip says how one instance uses the folder, in precedence order:
+
+| Use | Meaning |
 |---|---|
-| `rootFolder` | a root folder at exactly this path, with its free space |
+| `rootFolder` | a root folder at exactly this path (click the chip to stage its removal) |
 | `tracked` | a media item at exactly this path |
 | `ancestor` | media lives *under* here - the folder's reason to exist |
-| `inside` | inside one of its root folders, tracking nothing here (click to add one) |
-| `outside` | unrelated to its root folders (click to add one) |
-| `unknown` | the instance did not answer - deliberately *not* "missing" |
+
+An instance that uses the folder in none of those ways is simply **absent**, which is what
+replaced the old `inside`/`outside` cells: "inside a root folder and tracking nothing" is
+already said by the `untracked` badge, and "unrelated to my root folders" is said by having
+no chip. An unreachable instance is absent too - so a folder with no owner shows `— ?`, and
+the count of instances that did not answer is stated above the table. Unknown, deliberately
+not "nobody".
+
+Two instances rooting at one folder is legal and renders as two chips. It is supported, not
+optimised for, and it is deliberately *not* called drift.
+
+#### Monitoring
 
 Row badges are computed server-side so the vocabulary cannot drift: `root folder`,
 **`not a root folder`**, `untracked`, `unmanaged`, `missing`, `not mounted here`, `empty`,
 `symlink`, `no access`, `read-only`. The second of those is the question the view exists to
 answer - a folder sitting alongside your root folders that no instance roots at.
+
+Those collapse into one **severity** per row, so a glance is enough and a problem two levels
+down is not invisible:
+
+| Severity | Source | Rendered |
+|---|---|---|
+| `error` | `not mounted here`, `missing`, `no access` | red `✕` |
+| `warn` | `not a root folder`, `unmanaged`, `read-only`, low free space, a root folder its own instance calls inaccessible | amber `⚠` |
+| `info` | `untracked`, `empty`, `symlink` | nothing |
+| `ok` | none of the above | nothing |
+
+`untracked` is only `info` on purpose. It fires on every non-media folder inside a root
+folder, so promoting it would paint a healthy library amber and bury the two `warn` states
+that are actually questions. A collapsed row also shows a dimmed `⚠` when the level below it
+holds something worse than itself.
 
 There is deliberately **no parity or drift reporting here**. This view is for reorganising
 and monitoring folders in their own right; comparing a setting across instances and
@@ -245,6 +228,36 @@ assigns one up front - and that is not a problem, so those are not rows. Without
 distinction a healthy 384-film library reported 998 "missing" folders; with it, it
 reports none.
 
+#### Free space is monitored per filesystem, not per instance
+
+Every row reports the free space of the filesystem it is on, resolved by device id with one
+`statfs` per distinct filesystem per request and seeded from the `FS_ROOTS` mounts - so the
+usual single-`/data`-volume layout costs no extra syscalls. One line per mount above the
+table gives the aggregate.
+
+The `⚠ low` marker fires below `FS_LOW_SPACE_BYTES` (50 GiB by default, roughly one 4K remux
+plus margin, so it means "the next import may not fit") or below `FS_LOW_SPACE_PERCENT` of
+the total. The ratio ships disabled: 10% of a 50 TB array is 5 TB, which still holds fifty
+films, so a percentage is the rule you tune rather than the one you inherit.
+
+It only ever lands on a **mount or a root folder**. Every row under a root folder shares its
+filesystem, so flagging them all would paint a whole library amber and say nothing you could
+act on. The old per-instance free-space footer is gone for the same reason it was wrong: it
+summed each instance's root folders, double-counting one disk whenever two instances rooted
+on it.
+
+#### The instance filter
+
+The fleet bar is a **filter** on this view, not an action target: selecting instances narrows
+the tree to the folders they own. Scoping is server-side (`?instance=` is repeatable, like
+`path`), because everything a client would filter on is server-derived - the spine itself is
+built from the selected instances' root folders, and `matched`, `truncated` and every rollup
+count come from the full candidate set. A client-side filter would leave the summary row
+describing rows it had just removed.
+
+The bar keeps listing every instance whatever is selected, so the filter can always be turned
+off, and a summary row says what it is counting: `3 of 814 folders here belong to Radarr-4K`.
+
 #### A folder that still holds a whole library
 
 The case that prompted this: a folder full of films that is no longer anybody's root
@@ -260,7 +273,7 @@ children that need attention:
 
 The summary row states one thing at a time. During a search it says what the search
 matched - `1 of 9 folders here match "onepiece"` - and drops the state counts, because
-those describe entries that are not on screen.
+those describe entries that are not on screen. An instance filter does the same.
 
 The counts are exact even though the rows are a subset, because they come from one
 `readdir` plus an in-memory index rather than from the rows returned. The rule that makes
@@ -269,6 +282,11 @@ of 64 entries or fewer is served whole and fully probed, exactly like the old ex
 bigger one defaults to problems-only. `empty` and `no access` are the two counts that need
 a read per child, so on a big level they are reported as *not evaluated* (`null`) rather
 than as zero.
+
+That rule is also why the sort control offers only **Name** and **Needs attention**, and not
+"Modified". A level's entries come from one `readdir`, which carries no mtime, so ordering by
+it would mean statting all 814 children *before* paging - exactly the cost the design exists
+to avoid. The Modified column still reports the fact for the rows that were probed.
 
 #### Depth is where the old scan was wrong
 
@@ -279,10 +297,18 @@ path (`PathIndexService`), so "does any instance track anything at or under this
 an O(1) answer at any depth. That is also why the join is server-side: the browser would
 need the fleet's whole library to compute it.
 
-Row actions are derived from the roles: `propagate`, `remove` and `re-map` for root
-folders, `align` for anything an instance points at, and `new folder`, `rename`, `move`,
-`prune` for what is on disk. A mount is never renameable, and a prune is only offered when
-nothing anywhere would lose media by it.
+#### Actions
+
+Row actions are derived from the folder itself: `remove`, `re-map` and `align` from its
+owners, `add root folder` from whether any reachable instance could take one here, and
+`new folder`, `rename`, `move`, `prune` from what is on disk. A mount is never renameable,
+and a prune is only offered when nothing anywhere would lose media by it.
+
+**Which instance is never inferred from the fleet bar.** An action that removes or realigns
+takes its instances from the folder's own owners, and the dialog names each one before
+anything is staged; an action that *adds* a root folder asks, because a folder with no owner
+has nothing to infer from. That is what lets the bar be a filter without any action silently
+changing meaning.
 
 **Not offered on purpose:** an align chain for renaming an individual *media* folder.
 `media.moveRootFolder` only sets `rootFolderPath`, and `media.refresh` re-reads each item's
@@ -327,7 +353,7 @@ changes. That is what makes a mixed recipe possible:
 **ArrRanger must see media at exactly the same container path the *Arr apps use.** Paths
 are compared literally; there is deliberately no translation layer, because a wrong mapping
 that silently "works" would be far more dangerous than one that refuses. If the paths do
-not line up, the Storage view says so per instance and tells you which mounts it has.
+not line up, the folder view says so per instance and tells you which mounts it has.
 
 ```yaml
 services:
@@ -373,14 +399,14 @@ here, unlike for the SQLite database, which belongs on the cache disk).
 |---|---|
 | Scope | Directories only. No file-level create, rename or delete. |
 | Traversal | Every path is resolved against the configured roots; the parent chain is realpath'd, so a symlink cannot be used to escape. A symlink *leaf* is left unresolved, so "move this link" can never silently move the library behind it. |
-| Symlinks | Shown in the path matrix, never followed and never mutated. |
+| Symlinks | Shown in the folder view, never followed and never mutated. |
 | Deleting | Hard delete, no recycle bin. Non-empty needs `recursive`; a folder a connected instance still tracks needs `force`, and so does one ArrRanger cannot *check* - an unreachable instance is never read as a cleared one; the UI makes you type the folder name. Deleting a storage root or a mount point is refused outright. |
 | Cross-filesystem moves | **Refused.** The preflight compares device ids and reports how much would have to be copied: move it with your own tool (unBALANCE, rsync), then use Reconcile &amp; Align. |
 | Preflight | Runs before staging *and* again immediately before execution, so a staged operation that went stale fails with `fs_precondition_failed` instead of acting on a filesystem nobody reviewed. |
 
 ### Reconcile &amp; Align
 
-The headline workflow, reached from the `align` action on any row in the path matrix that
+The headline workflow, reached from the `align` action on any row in the folder view that
 an instance points at. Pick a tracked folder, give it a new name, choose which instances to
 realign, and ArrRanger stages one dependent chain:
 

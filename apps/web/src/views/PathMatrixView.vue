@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
-import type { NewQueueItem, PathNode, PathSelector } from '@arrranger/shared';
+import { computed, onMounted, ref, watch } from 'vue';
+import type { PathNode } from '@arrranger/shared';
 import BaseButton from '@/components/base/BaseButton.vue';
 import EmptyState from '@/components/base/EmptyState.vue';
 import FleetBar from '@/components/fleet/FleetBar.vue';
-import InstanceColumnHeader from '@/components/fleet/InstanceColumnHeader.vue';
 import PathRowView from '@/components/paths/PathRowView.vue';
 import RollupSummary from '@/components/paths/RollupSummary.vue';
 import AddPathDialog from '@/components/roots/AddPathDialog.vue';
@@ -14,7 +13,7 @@ import DiskOperationModal, { type DiskOperation } from '@/components/storage/Dis
 import ReconcileDialog from '@/components/storage/ReconcileDialog.vue';
 import { breadcrumbs } from '@/lib/fs-tree';
 import { formatBytes, formatRelativeTime } from '@/lib/format';
-import { missingRootFolderOn, rootFolderTargets, trackedBy, type PathAction } from '@/lib/path-matrix';
+import { rootFolderTargets, trackedBy, unknownColumns, type PathAction } from '@/lib/path-matrix';
 import { useMatrixStore } from '@/stores/matrix';
 import { usePathsStore } from '@/stores/paths';
 import { useQueueStore, type RootFolderTarget } from '@/stores/queue';
@@ -23,7 +22,7 @@ const paths = usePathsStore();
 const queue = useQueueStore();
 const matrix = useMatrixStore();
 
-const adding = ref<{ path: string; preselect: number[] } | null>(null);
+const adding = ref<{ path: string; paths: string[]; preselect: number[] } | null>(null);
 const remapping = ref<string | null>(null);
 const removing = ref<RootFolderTarget[] | null>(null);
 const reconciling = ref<string | null>(null);
@@ -32,19 +31,23 @@ const operation = ref<{ operation: DiskOperation; target: string } | null>(null)
 const selected = ref<string[]>([]);
 const search = ref('');
 
-/** The segmented filter. `null` means "whatever each level decides for itself". */
-const SELECTORS: ReadonlyArray<{ label: string; value: readonly PathSelector[] | null }> = [
-  { label: 'Default', value: null },
-  { label: 'Problems', value: ['problems'] },
-  { label: 'Not a root folder', value: ['candidates'] },
-  { label: 'Root folders', value: ['rootFolders'] },
-  { label: 'Everything', value: ['all'] },
-];
-
 const columns = computed(() => paths.columns);
 
-/** Instance columns come from the fleet store so FleetBar targeting still drives them. */
-const targets = computed(() => matrix.targetInstanceIds);
+/**
+ * The instances that could not be read.
+ *
+ * This is where the per-instance `?` cell went. A folder has one owner, so the grid that
+ * used to state "this instance did not answer" per row is gone - but the distinction it
+ * carried is not optional, so the view says it once, above the table.
+ */
+const unknown = computed(() => unknownColumns(columns.value));
+
+/** What the fleet bar filters the tree to, by name, for the summary rows. */
+const filteredNames = computed(() =>
+  paths.instanceFilter
+    .map((id) => columns.value.find((column) => column.instanceId === id)?.name ?? `instance ${String(id)}`)
+    .sort((a, b) => a.localeCompare(b, 'en')),
+);
 
 const crumbs = computed(() =>
   paths.focus === null ? [] : breadcrumbs(paths.focus, paths.rootPaths),
@@ -54,19 +57,12 @@ const selectedNodes = computed(() =>
   selected.value.map((path) => paths.nodeAt(path)).filter((node): node is PathNode => node !== null),
 );
 
-const propagatable = computed(() =>
-  selectedNodes.value.flatMap((node) => missingRootFolderOn(node, targets.value)),
-);
+/** Selected folders that could take a root folder. Which instances is the dialog's job. */
+const rootable = computed(() => selectedNodes.value.filter((node) => node.canAddRootFolder));
 
 const deletable = computed<RootFolderTarget[]>(() =>
-  selectedNodes.value.flatMap((node) => rootFolderTargets(node, targets.value)),
+  selectedNodes.value.flatMap((node) => rootFolderTargets(node)),
 );
-
-const activeSelector = computed(() => JSON.stringify(paths.selection));
-
-function isActiveSelector(value: readonly PathSelector[] | null): boolean {
-  return activeSelector.value === JSON.stringify(value);
-}
 
 function toggleSelected(path: string): void {
   selected.value = selected.value.includes(path)
@@ -81,29 +77,15 @@ function instanceName(instanceId: number): string {
   );
 }
 
-async function propagateSelected(): Promise<void> {
-  const batch: NewQueueItem[] = selectedNodes.value.flatMap((node) =>
-    missingRootFolderOn(node, targets.value).map((instanceId) => ({
-      instanceId,
-      op: 'rootFolder.create' as const,
-      payload: { path: node.path },
-    })),
-  );
-
-  await queue.stage(
-    batch,
-    `${String(selectedNodes.value.length)} path(s) on ${String(new Set(batch.map((item) => item.instanceId)).size)} instance(s)`,
-  );
-  selected.value = [];
-}
-
 function runAction(node: PathNode, action: PathAction): void {
   switch (action) {
-    case 'propagate':
-      adding.value = { path: node.path, preselect: missingRootFolderOn(node, targets.value) };
+    case 'addRoot':
+      // No preselection: the folder has no owner to infer one from, and the dialog already
+      // marks every instance that has it.
+      adding.value = { path: node.path, paths: [], preselect: [] };
       return;
     case 'remove':
-      removing.value = rootFolderTargets(node, targets.value);
+      removing.value = rootFolderTargets(node);
       return;
     case 'remap':
       remapping.value = node.path;
@@ -129,12 +111,11 @@ function runAction(node: PathNode, action: PathAction): void {
   }
 }
 
-function stageCellCreate(node: PathNode, instanceId: number): void {
-  void queue.createRootFolderAcross(node.path, [instanceId]);
-}
-
-function stageCellRemove(node: PathNode, instanceId: number, rootFolderId: number | null): void {
-  removing.value = [{ instanceId, rootFolderId: rootFolderId ?? 0, path: node.path }];
+/** Clicking an owning root-folder chip stages its removal from that instance alone. */
+function removeOwner(node: PathNode, target: { instanceId: number; rootFolderId: number | null }): void {
+  removing.value = [
+    { instanceId: target.instanceId, rootFolderId: target.rootFolderId ?? 0, path: node.path },
+  ];
 }
 
 /** The instances a relocation would leave dangling, passed to the disk dialog. */
@@ -142,8 +123,46 @@ const operationTrackedBy = computed(() => {
   const target = operation.value?.target;
   if (target === undefined) return [];
   const node = paths.nodeAt(target);
-  return node === null ? [] : trackedBy(node, columns.value);
+  return node === null ? [] : trackedBy(node);
 });
+
+/**
+ * Free space is a property of a filesystem, not of an instance.
+ *
+ * The old footer summed each instance's root folders' free space, which double-counted
+ * the same disk whenever two instances rooted on one mount. One line per mount instead.
+ */
+const filesystems = computed(() =>
+  paths.roots
+    .filter((root) => root.exists && root.freeSpace !== null)
+    .map((root) => ({
+      path: root.path,
+      freeSpace: root.freeSpace,
+      totalSpace: root.totalSpace,
+      share:
+        root.totalSpace === null || root.totalSpace === 0 || root.freeSpace === null
+          ? null
+          : Math.round((root.freeSpace / root.totalSpace) * 100),
+    })),
+);
+
+// The fleet bar is a filter here, not an action target: selecting instances narrows the
+// tree to their folders. Scoping is server-side, because the spine itself is built from
+// the selected instances' root folders.
+watch(
+  () => matrix.selectedInstanceIds,
+  (ids) => {
+    if (paths.loadedOnce) void paths.setInstanceFilter(ids);
+  },
+  { deep: true },
+);
+
+/** A rescan resets the tree to the spine, same as a fresh load - the flat list is its own
+ *  crawl (see `loadFlatView`), so re-run that too if it was on. */
+async function rescan(): Promise<void> {
+  await paths.load({ refresh: true });
+  if (paths.flatView) await paths.setFlatView(true);
+}
 
 onMounted(async () => {
   if (!paths.loadedOnce) await paths.load();
@@ -153,7 +172,7 @@ onMounted(async () => {
 
 <template>
   <div class="space-y-4">
-    <FleetBar />
+    <FleetBar mode="filter" />
 
     <EmptyState
       v-if="!paths.enabled && !paths.loading"
@@ -212,6 +231,27 @@ environment:
         </p>
       </section>
 
+      <!-- free space, per filesystem: the number a mount has, not one per instance -->
+      <div
+        v-if="filesystems.length > 0"
+        class="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-line bg-raised/40 px-3 py-2 text-[11px]"
+        data-testid="filesystem-space"
+      >
+        <span class="font-semibold tracking-wide text-faint uppercase">Free space</span>
+        <span
+          v-for="fs in filesystems"
+          :key="fs.path"
+          class="flex items-center gap-1.5"
+          :title="`Every folder under ${fs.path} shares this filesystem`"
+        >
+          <span class="font-mono text-muted">{{ fs.path }}</span>
+          <span class="text-ink">{{ formatBytes(fs.freeSpace) }} free</span>
+          <span v-if="fs.totalSpace !== null" class="text-faint">
+            of {{ formatBytes(fs.totalSpace) }}<template v-if="fs.share !== null"> ({{ fs.share }}%)</template>
+          </span>
+        </span>
+      </div>
+
       <!-- totals -->
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
         <span class="text-muted">{{ paths.totals.rootFolderPaths }} root folder path(s)</span>
@@ -241,17 +281,29 @@ environment:
           class="h-9 w-48 rounded-md border border-line bg-raised px-3 text-sm text-ink outline-none focus:border-accent"
           @change="paths.setFilter(search)"
         />
-        <div class="flex flex-wrap gap-1">
-          <BaseButton
-            v-for="selector in SELECTORS"
-            :key="selector.label"
-            size="sm"
-            :variant="isActiveSelector(selector.value) ? 'primary' : 'ghost'"
-            @click="paths.setSelection(selector.value)"
-          >
-            {{ selector.label }}
+
+        <div v-if="!paths.flatView" class="flex items-center gap-1">
+          <BaseButton size="sm" variant="ghost" :disabled="paths.busy" @click="paths.expandAll()">
+            Expand all
+          </BaseButton>
+          <BaseButton size="sm" variant="ghost" @click="paths.collapseAll()">
+            Collapse all
           </BaseButton>
         </div>
+        <BaseButton
+          size="sm"
+          variant="ghost"
+          :disabled="paths.busy"
+          :title="
+            paths.flatView
+              ? 'Back to the folder tree'
+              : 'List every leaf folder with its full path, without the tree'
+          "
+          @click="paths.setFlatView(!paths.flatView)"
+        >
+          {{ paths.flatView ? 'Tree view' : 'Flat list' }}
+        </BaseButton>
+
         <span v-if="paths.busy" class="flex items-center gap-1.5 text-[11px] text-accent">
           <span
             class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"
@@ -268,32 +320,41 @@ environment:
         </span>
 
         <div class="ml-auto flex flex-wrap items-center gap-2">
-          <BaseButton size="sm" :loading="paths.loading" @click="paths.load({ refresh: true })">
+          <BaseButton size="sm" :loading="paths.loading" @click="rescan">
             Rescan
           </BaseButton>
-          <BaseButton size="sm" variant="primary" @click="adding = { path: '', preselect: [] }">
+          <BaseButton
+            size="sm"
+            variant="primary"
+            @click="adding = { path: '', paths: [], preselect: [] }"
+          >
             Add root folder…
           </BaseButton>
           <BaseButton
             size="sm"
             variant="success"
-            :disabled="propagatable.length === 0"
+            :disabled="rootable.length === 0"
             :title="
-              propagatable.length === 0
-                ? 'Select rows that are missing on at least one targeted instance'
-                : `Stage ${propagatable.length} create(s)`
+              rootable.length === 0
+                ? 'Select folders that could take a root folder'
+                : `Choose the instances for ${rootable.length} folder(s)`
             "
-            @click="propagateSelected()"
+            @click="adding = { path: '', paths: rootable.map((node) => node.path), preselect: [] }"
           >
-            Propagate missing ({{ propagatable.length }})
+            Add root folder here… ({{ rootable.length }})
           </BaseButton>
           <BaseButton
             size="sm"
             variant="danger"
             :disabled="deletable.length === 0"
+            :title="
+              deletable.length === 0
+                ? 'Select folders an instance roots at'
+                : `Remove ${deletable.length} root folder(s) from the instances that own them`
+            "
             @click="removing = deletable"
           >
-            Remove ({{ deletable.length }})
+            Remove root folder… ({{ deletable.length }})
           </BaseButton>
         </div>
       </div>
@@ -346,108 +407,107 @@ environment:
         icon="🗄"
       />
 
-      <div v-else class="overflow-x-auto rounded-lg border border-line transition-opacity" :class="paths.busy ? 'opacity-60' : ''">
-        <table class="w-full border-collapse text-xs">
-          <thead>
-            <tr>
-              <th
-                scope="col"
-                class="sticky left-0 z-20 min-w-[22rem] border-b border-line bg-raised px-3 py-2 text-left text-[11px] font-semibold text-muted"
-              >
-                Path
-              </th>
-              <th class="border-b border-l border-line bg-raised px-2 py-2 text-left text-[11px] font-semibold text-muted">
-                Size
-              </th>
-              <th class="border-b border-l border-line bg-raised px-2 py-2 text-left text-[11px] font-semibold text-muted">
-                Disk
-              </th>
-              <InstanceColumnHeader
-                v-for="column in matrix.columns"
-                :key="column.instance.id"
-                :column="column"
-              />
-              <th class="border-b border-l border-line bg-raised px-2 py-2 text-right text-[11px] font-semibold text-muted">
-                Row actions
-              </th>
-            </tr>
-          </thead>
+      <div v-else class="space-y-2">
+        <!-- the statement the per-instance `?` cell used to carry, said once -->
+        <p v-if="unknown.length > 0" class="text-[11px] text-danger" data-testid="unknown-instances">
+          {{ unknown.length }} instance(s) did not answer
+          ({{ unknown.map((column) => column.name).join(', ') }}) - the Used by column below is
+          incomplete for them, and a folder with no owner may still be one of theirs. Unknown,
+          deliberately not "nobody".
+        </p>
 
-          <tbody>
-            <template v-for="row in paths.rows" :key="row.key">
-              <PathRowView
-                v-if="row.kind === 'node' && row.node"
-                :node="row.node"
-                :depth="row.depth"
-                :columns="columns"
-                :target-instance-ids="targets"
-                :expanded="row.expanded"
-                :busy="queue.busy"
-                :loading="paths.isLoadingPath(row.node.path)"
-                :selected="selected.includes(row.node.path)"
-                :measured="paths.measurements[row.node.path]?.sizeOnDisk ?? null"
-                :measuring="paths.measuring[row.node.path] === true"
-                :staged-for-path="queue.stagedForPath(row.node.path)"
-                :staged-for-cell="queue.stagedForRootFolder"
-                @toggle="paths.toggle(row.node.path)"
-                @select="toggleSelected(row.node.path)"
-                @measure="paths.measure(row.node.path)"
-                @action="runAction(row.node, $event)"
-                @cell-create="stageCellCreate(row.node, $event)"
-                @cell-remove="stageCellRemove(row.node, $event.instanceId, $event.rootFolderId)"
-              />
-              <RollupSummary
-                v-else-if="row.kind === 'rollup' && row.level"
-                :level="row.level"
-                :depth="row.depth"
-                :columns="columns.length + 3"
-                :busy="paths.isLoadingPath(row.levelPath)"
-                :filter="paths.filter"
-                @show-more="paths.loadMore(row.levelPath)"
-                @show-all="paths.showAll(row.levelPath)"
-              />
-            </template>
-          </tbody>
+        <div class="overflow-x-auto rounded-lg border border-line transition-opacity" :class="paths.busy ? 'opacity-60' : ''">
+          <table class="w-full border-collapse text-xs">
+            <thead>
+              <tr>
+                <th
+                  scope="col"
+                  class="sticky left-0 z-20 min-w-[20rem] border-b border-line bg-raised px-3 py-2 text-left text-[11px] font-semibold text-muted"
+                >
+                  Path
+                </th>
+                <th
+                  class="border-b border-l border-line bg-raised px-2 py-2 text-left text-[11px] font-semibold text-muted"
+                  title="The instances that root at, track, or hold media under this folder"
+                >
+                  Used by
+                </th>
+                <th class="border-b border-l border-line bg-raised px-2 py-2 text-left text-[11px] font-semibold text-muted">
+                  Media
+                </th>
+                <th class="border-b border-l border-line bg-raised px-2 py-2 text-left text-[11px] font-semibold text-muted">
+                  Size
+                </th>
+                <th class="border-b border-l border-line bg-raised px-2 py-2 text-left text-[11px] font-semibold text-muted">
+                  Modified
+                </th>
+                <th
+                  class="border-b border-l border-line bg-raised px-2 py-2 text-left text-[11px] font-semibold text-muted"
+                  title="Free space on the filesystem this folder is on"
+                >
+                  Free
+                </th>
+                <th class="border-b border-l border-line bg-raised px-2 py-2 text-left text-[11px] font-semibold text-muted">
+                  State
+                </th>
+                <th class="border-b border-l border-line bg-raised px-2 py-2 text-right text-[11px] font-semibold text-muted">
+                  Row actions
+                </th>
+              </tr>
+            </thead>
 
-          <tfoot>
-            <tr class="bg-raised/40">
-              <th
-                scope="row"
-                class="sticky left-0 z-10 bg-raised px-3 py-1.5 text-left text-[11px] font-medium text-muted"
-              >
-                free space
-              </th>
-              <td class="border-l border-line" />
-              <td class="border-l border-line" />
-              <td
-                v-for="column in matrix.columns"
-                :key="column.instance.id"
-                class="border-l border-line px-2 py-1.5 text-center font-mono text-[11px] text-muted"
-              >
-                {{
-                  column.status === 'ok'
-                    ? formatBytes(
-                        column.rootFolders.reduce((sum, folder) => sum + (folder.freeSpace ?? 0), 0),
-                      )
-                    : '—'
-                }}
-              </td>
-              <td class="border-l border-line" />
-            </tr>
-          </tfoot>
-        </table>
+            <tbody>
+              <template v-for="row in paths.rows" :key="row.key">
+                <PathRowView
+                  v-if="row.kind === 'node' && row.node"
+                  :node="row.node"
+                  :depth="row.depth"
+                  :flat="paths.flatView"
+                  :unknown-count="unknown.length"
+                  :expanded="row.expanded"
+                  :child-severity="row.childSeverity"
+                  :busy="queue.busy"
+                  :loading="paths.isLoadingPath(row.node.path)"
+                  :selected="selected.includes(row.node.path)"
+                  :measured="paths.measurements[row.node.path]?.sizeOnDisk ?? null"
+                  :measuring="paths.measuring[row.node.path] === true"
+                  :staged-for-path="queue.stagedForPath(row.node.path)"
+                  :staged-for-cell="queue.stagedForRootFolder"
+                  @toggle="paths.toggle(row.node.path)"
+                  @select="toggleSelected(row.node.path)"
+                  @measure="paths.measure(row.node.path)"
+                  @action="runAction(row.node, $event)"
+                  @owner-remove="removeOwner(row.node, $event)"
+                />
+                <RollupSummary
+                  v-else-if="row.kind === 'rollup' && row.level"
+                  :level="row.level"
+                  :depth="row.depth"
+                  :busy="paths.isLoadingPath(row.levelPath)"
+                  :filter="paths.filter"
+                  :instance-names="filteredNames"
+                  @show-more="paths.loadMore(row.levelPath)"
+                  @show-all="paths.showAll(row.levelPath)"
+                />
+              </template>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <p class="text-[11px] leading-relaxed text-muted">
-        Disk operations are staged like any other change: they land in Pending Fleet Changes,
-        run in order with the *Arr steps, and their preflight runs again immediately before
-        execution. Symlinks are shown but never followed or modified.
+        Folders are managed here in their own right - this view does not compare a folder
+        across instances, because a folder normally belongs to one. Disk operations are staged
+        like any other change: they land in Pending Fleet Changes, run in order with the *Arr
+        steps, and their preflight runs again immediately before execution. Symlinks are shown
+        but never followed or modified.
       </p>
     </template>
 
     <AddPathDialog
       v-if="adding"
       :path="adding.path"
+      :paths="adding.paths"
       :preselect="adding.preselect"
       @close="adding = null"
     />

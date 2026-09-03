@@ -54,7 +54,11 @@ export async function createContext(params: {
   const instances = new InstancesService({ instances: instancesRepo, snapshots, dispatchers });
   const resources = new ResourcesService({ instances: instancesRepo, snapshots, dispatchers });
   const pathIndex = new PathIndexService({ instances: instancesRepo, resources });
-  const pathMatrix = new PathMatrixService({ index: pathIndex, filesystem });
+  const pathMatrix = new PathMatrixService({
+    index: pathIndex,
+    filesystem,
+    lowSpace: { bytes: config.lowSpaceBytes, percent: config.lowSpacePercent },
+  });
 
   // The safety guards ask *Arr what it still owns. The index answers from cached
   // snapshots alone and never touches the disk, so there is no cycle to break here.

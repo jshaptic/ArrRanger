@@ -9,7 +9,6 @@ import type {
   PathMatrixResponse,
   PathMatrixTotals,
   PathNode,
-  PathSelector,
   QueuePayloadFor,
 } from '@arrranger/shared';
 import { defineStore } from 'pinia';
@@ -17,6 +16,7 @@ import { computed, ref } from 'vue';
 import { ApiRequestError } from '@/api/client';
 import { storageApi } from '@/api/storage';
 import {
+  flattenLeaves,
   flattenLevels,
   levelKey,
   rootFolderTargets,
@@ -56,14 +56,18 @@ export const usePathsStore = defineStore('paths', () => {
   const roots = ref<readonly FsRoot[]>([]);
   const columns = ref<readonly PathMatrixColumn[]>([]);
   const levels = ref<Record<string, PathMatrixLevel>>({});
+  /** The flat list's own cache - see `loadFlatView`. Never shares state with `levels`. */
+  const flatLevels = ref<Record<string, PathMatrixLevel>>({});
   const totals = ref<PathMatrixTotals>(emptyTotals());
   const mismatches = ref<readonly MappingMismatch[]>([]);
   const scannedAt = ref<string | null>(null);
 
   const expanded = ref<string[]>([]);
   const focus = ref<string | null>(null);
-  const selection = ref<readonly PathSelector[] | null>(null);
+  const flatView = ref(false);
   const filter = ref('');
+  /** Which instances' folders to show. Empty means the whole fleet. */
+  const instanceFilter = ref<number[]>([]);
 
   const measurements = ref<Record<string, FsMeasurement>>({});
   const measuring = ref<Record<string, boolean>>({});
@@ -80,7 +84,9 @@ export const usePathsStore = defineStore('paths', () => {
   const isLoadingPath = (path: string): boolean => loadingPaths.value[path] === true;
 
   const rows = computed<PathRow[]>(() =>
-    flattenLevels({ levels: levels.value, expanded: expanded.value, focus: focus.value }),
+    flatView.value
+      ? flattenLeaves({ levels: flatLevels.value, expanded: [], focus: focus.value })
+      : flattenLevels({ levels: levels.value, expanded: expanded.value, focus: focus.value }),
   );
 
   const usableRoots = computed(() => roots.value.filter((root) => root.exists));
@@ -116,12 +122,9 @@ export const usePathsStore = defineStore('paths', () => {
     return null;
   }
 
-  function rootFolderTargetsFor(
-    path: string,
-    targetInstanceIds: readonly number[],
-  ): RootFolderCellTarget[] {
+  function rootFolderTargetsFor(path: string): RootFolderCellTarget[] {
     const node = nodeAt(path);
-    return node === null ? [] : rootFolderTargets(node, targetInstanceIds);
+    return node === null ? [] : rootFolderTargets(node);
   }
 
   function mergeLevels(response: PathMatrixResponse): void {
@@ -136,8 +139,8 @@ export const usePathsStore = defineStore('paths', () => {
   function requestFor(paths: readonly string[]): Parameters<typeof storageApi.matrix>[0] {
     return {
       paths,
-      ...(selection.value === null ? {} : { only: selection.value }),
       ...(filter.value.trim().length === 0 ? {} : { filter: filter.value.trim() }),
+      ...(instanceFilter.value.length === 0 ? {} : { instanceIds: instanceFilter.value }),
     };
   }
 
@@ -218,6 +221,126 @@ export const usePathsStore = defineStore('paths', () => {
     else await expand(path);
   }
 
+  /**
+   * Opens every expandable node reachable from the current root, fetching whatever level
+   * that takes - one batched request per depth, since a level's children are unknown until
+   * the level itself is fetched. Bounded the same way ordinary browsing is: a level that
+   * summarises a big directory still only returns the rows worth showing.
+   */
+  async function expandAll(): Promise<void> {
+    for (;;) {
+      const known = Object.values(levels.value).flatMap((level) => level.nodes);
+      const expandable = known.filter((node) => node.expandable);
+
+      const notYetOpen = expandable.map((node) => node.path).filter((path) => !isExpanded(path));
+      if (notYetOpen.length > 0) expanded.value = [...expanded.value, ...notYetOpen];
+
+      const unfetched = expandable
+        .map((node) => node.path)
+        .filter((path) => levels.value[path] === undefined);
+      if (unfetched.length === 0) break;
+      await fetchLevels(unfetched);
+    }
+  }
+
+  /** Descendants stay cached, same as a single `collapse` - only the tree closes. */
+  function collapseAll(): void {
+    expanded.value = [];
+  }
+
+  /**
+   * Fetches a whole depth of levels for the flat list in one request - `path` is
+   * repeatable, and the crawl now visits every folder, so one request per folder would be
+   * a request storm on a wide tree.
+   *
+   * `only: ['all']` so a big directory is not narrowed to problems-only, which would hide
+   * ordinary subfolders and make a branch look like a leaf. Anything still truncated is
+   * then paged on its own - one extra request per oversized directory, not per path.
+   */
+  async function fetchFlatLevels(paths: readonly string[]): Promise<PathMatrixLevel[]> {
+    if (paths.length === 0) return [];
+    const response = await storageApi.matrix({ ...requestFor(paths), only: ['all'], limit: 1000 });
+
+    return Promise.all(
+      response.levels.map(async (fetched) => {
+        let level = fetched;
+        while (level.truncated && level.path !== null) {
+          const path = level.path;
+          const more = await storageApi.matrix({
+            ...requestFor([path]),
+            only: ['all'],
+            limit: 1000,
+            offset: level.offset + level.nodes.length,
+          });
+          const next = more.levels.find((entry) => entry.path === path);
+          if (next === undefined) break;
+          level = { ...next, offset: level.offset, nodes: [...level.nodes, ...next.nodes] };
+        }
+        return level;
+      }),
+    );
+  }
+
+  /**
+   * Crawls the whole tree from the current root for the flat list, breadth-first, into a
+   * cache of its own (`flatLevels`) rather than the hierarchical `levels` the tree view
+   * reads. That separation is deliberate: showing every leaf means asking every big
+   * directory for everything rather than the light "problems only" default a normal
+   * expand click gets, and that fuller (file-inclusive) listing must never end up where
+   * the tree view would render it.
+   *
+   * The top level (mounts) is reused as-is from the already-loaded spine - it is never
+   * large enough to need the "full" treatment, and re-deriving it here would just be a
+   * second copy of the same handful of rows.
+   */
+  async function loadFlatView(): Promise<void> {
+    const startPath = focus.value;
+    const next: Record<string, PathMatrixLevel> = {};
+    let frontier: string[];
+
+    if (startPath === null) {
+      const topLevel = levels.value[TOP_LEVEL];
+      if (topLevel !== undefined) next[TOP_LEVEL] = topLevel;
+      frontier = (topLevel?.nodes ?? [])
+        .filter((node) => node.kind === 'directory' && node.expandable)
+        .map((node) => node.path);
+    } else {
+      frontier = [startPath];
+    }
+
+    loading.value = true;
+    try {
+      const visited = new Set<string>();
+      while (frontier.length > 0) {
+        const fetched = await fetchFlatLevels(frontier);
+        const nextFrontier: string[] = [];
+        for (const level of fetched) {
+          next[levelKey(level.path)] = level;
+          for (const node of level.nodes) {
+            // Every folder is visited: whether it is a leaf is decided by what its own
+            // level holds, and a folder full of files looks identical from up here.
+            if (node.kind !== 'directory' || !node.expandable) continue;
+            if (visited.has(node.path)) continue;
+            visited.add(node.path);
+            nextFrontier.push(node.path);
+          }
+        }
+        frontier = nextFrontier;
+      }
+      flatLevels.value = next;
+    } catch (caught) {
+      ui.notify('error', `Could not read the flat list: ${messageOf(caught)}`);
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  /** Turning flat view on crawls the whole tree first - see `loadFlatView`. */
+  async function setFlatView(value: boolean): Promise<void> {
+    flatView.value = value;
+    if (value) await loadFlatView();
+  }
+
   /** "Show more" on a summary row: the next page of the same level. */
   async function loadMore(path: string): Promise<void> {
     const level = levels.value[levelKey(path === TOP_LEVEL ? null : path)];
@@ -263,9 +386,10 @@ export const usePathsStore = defineStore('paths', () => {
     }
   }
 
-  async function setSelection(only: readonly PathSelector[] | null): Promise<void> {
-    selection.value = only;
-    await refetchOpen();
+  /** One request for every open level - the reason `path` is repeatable. */
+  async function refetchOpen(): Promise<void> {
+    const open = expanded.value.filter((path) => levels.value[path] !== undefined);
+    await fetchLevels(open);
   }
 
   async function setFilter(value: string): Promise<void> {
@@ -273,10 +397,16 @@ export const usePathsStore = defineStore('paths', () => {
     await refetchOpen();
   }
 
-  /** One request for every open level - the reason `path` is repeatable. */
-  async function refetchOpen(): Promise<void> {
-    const open = expanded.value.filter((path) => levels.value[path] !== undefined);
-    await fetchLevels(open);
+  /**
+   * A whole reload, not a refetch of the open levels: the spine itself is scoped to the
+   * selected instances, so which levels exist changes with the filter. `refresh: false`
+   * keeps it off the *Arr APIs - the cached index already knows who roots where.
+   */
+  async function setInstanceFilter(ids: readonly number[]): Promise<void> {
+    const next = [...ids].sort((a, b) => a - b);
+    if (next.join(',') === instanceFilter.value.join(',')) return;
+    instanceFilter.value = next;
+    await reload({ refresh: false });
   }
 
   async function focusOn(path: string): Promise<void> {
@@ -306,12 +436,17 @@ export const usePathsStore = defineStore('paths', () => {
     return storageApi.preflight(op, payload);
   }
 
-  /** Called after a run touched the disk or an instance. */
-  async function refreshAll(): Promise<void> {
-    measurements.value = {};
+  /**
+   * Reload the spine while keeping whatever the user had open, open.
+   *
+   * `load()` alone would collapse the tree back to the spine, which is the wrong answer
+   * both after a run and after a filter change: the levels below are still the levels
+   * being worked on.
+   */
+  async function reload(options: { refresh?: boolean } = {}): Promise<void> {
     const open = [...expanded.value];
-    await load({ refresh: true });
-    // Re-open whatever the user had open that the spine did not already cover.
+    await load(options);
+    // Re-open whatever the user had open that the new spine did not already cover.
     const missing = open.filter((path) => levels.value[path] === undefined);
     if (missing.length > 0) {
       expanded.value = [...new Set([...expanded.value, ...missing])];
@@ -319,18 +454,26 @@ export const usePathsStore = defineStore('paths', () => {
     }
   }
 
+  /** Called after a run touched the disk or an instance. */
+  async function refreshAll(): Promise<void> {
+    measurements.value = {};
+    await reload({ refresh: true });
+  }
+
   return {
     enabled,
     roots,
     columns,
     levels,
+    flatLevels,
     totals,
     mismatches,
     scannedAt,
     expanded,
     focus,
-    selection,
+    flatView,
     filter,
+    instanceFilter,
     measurements,
     measuring,
     loading,
@@ -354,14 +497,18 @@ export const usePathsStore = defineStore('paths', () => {
     expand,
     collapse,
     toggle,
+    expandAll,
+    collapseAll,
+    setFlatView,
     loadMore,
     showAll,
-    setSelection,
     setFilter,
+    setInstanceFilter,
     focusOn,
     clearFocus,
     measure,
     preflight,
+    reload,
     refreshAll,
   };
 });

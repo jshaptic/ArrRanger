@@ -23,8 +23,69 @@ export interface AppConfig {
    * see - ArrRanger deliberately has no path translation layer.
    */
   readonly fsRoots: readonly string[];
+  /**
+   * A filesystem with less than this much free space is reported as low.
+   *
+   * Deliberately separate from the 1 GiB `LOW_SPACE_BYTES` in the filesystem service: that
+   * answers "will this mkdir or move succeed", this answers "is this library filling up".
+   * Unifying them would make one of the two wrong.
+   */
+  readonly lowSpaceBytes: number;
+  /**
+   * A filesystem with less than this percentage free is reported as low, OR'd with the
+   * byte floor above. Zero - the default - disables the ratio.
+   *
+   * Off by default because a ratio is loud on a large array: 10% of a 50 TB array is 5 TB,
+   * which still holds fifty 4K films. The byte floor is the rule that is right at every
+   * disk size; the ratio is for people who know their own headroom.
+   */
+  readonly lowSpacePercent: number;
   /** Used to derive the AES key for stored *Arr API keys. Never log this. */
   readonly secret: string;
+}
+
+/** 50 GiB - roughly one 4K remux plus margin, so the warning means "the next import may not fit". */
+const DEFAULT_LOW_SPACE_BYTES = 50 * 1024 ** 3;
+
+const BYTE_UNITS: Readonly<Record<string, number>> = {
+  b: 1,
+  k: 1024,
+  kb: 1024,
+  kib: 1024,
+  m: 1024 ** 2,
+  mb: 1024 ** 2,
+  mib: 1024 ** 2,
+  g: 1024 ** 3,
+  gb: 1024 ** 3,
+  gib: 1024 ** 3,
+  t: 1024 ** 4,
+  tb: 1024 ** 4,
+  tib: 1024 ** 4,
+  p: 1024 ** 5,
+  pb: 1024 ** 5,
+  pib: 1024 ** 5,
+};
+
+export interface LowSpaceThresholds {
+  readonly bytes: number;
+  readonly percent: number;
+}
+
+/**
+ * Is this filesystem low on space?
+ *
+ * Pure and exported so the rule can be tested without a filesystem, and so the server and
+ * the tests can never disagree about what "low" means.
+ */
+export function isLowSpace(
+  freeSpace: number | null,
+  totalSpace: number | null,
+  thresholds: LowSpaceThresholds,
+): boolean {
+  if (freeSpace === null) return false;
+  if (thresholds.bytes > 0 && freeSpace < thresholds.bytes) return true;
+  if (thresholds.percent <= 0 || totalSpace === null || totalSpace <= 0) return false;
+  return freeSpace / totalSpace < thresholds.percent / 100;
 }
 
 /**
@@ -48,6 +109,25 @@ function envInt(key: string, fallback: number): number {
     throw new Error(`Environment variable ${key} must be an integer, got "${raw}"`);
   }
   return parsed;
+}
+
+/**
+ * A byte count, optionally with a unit: `50G`, `50GiB`, `500M`, or a plain number. The
+ * audience writes docker-compose files, where `53687091200` is an invitation to be off by
+ * a factor of 1024.
+ */
+function envBytes(key: string, fallback: number): number {
+  const raw = envString(key);
+  if (raw === undefined) return fallback;
+
+  const match = /^(\d+(?:\.\d+)?)\s*([a-zA-Z]*)$/.exec(raw);
+  const unit = match === null ? undefined : BYTE_UNITS[(match[2] ?? '').toLowerCase() || 'b'];
+  if (match === null || unit === undefined) {
+    throw new Error(
+      `Environment variable ${key} must be a byte count such as 50G, 500MiB or 1073741824, got "${raw}"`,
+    );
+  }
+  return Math.floor(Number(match[1]) * unit);
 }
 
 function envBool(key: string, fallback: boolean): boolean {
@@ -91,6 +171,8 @@ export function loadConfig(): AppConfig {
       .split(':')
       .map((root) => root.trim())
       .filter((root) => root.length > 0),
+    lowSpaceBytes: envBytes('FS_LOW_SPACE_BYTES', DEFAULT_LOW_SPACE_BYTES),
+    lowSpacePercent: envInt('FS_LOW_SPACE_PERCENT', 0),
     secret: resolveSecret(process.env['ARRRANGER_SECRET'], path.join(configDir, 'secret.key')),
   };
 

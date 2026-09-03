@@ -1,9 +1,11 @@
-import type {
-  PathFlag,
-  PathInstanceCell,
-  PathMatrixColumn,
-  PathMatrixLevel,
-  PathNode,
+import {
+  PATH_SEVERITIES,
+  type PathFlag,
+  type PathMatrixColumn,
+  type PathMatrixLevel,
+  type PathNode,
+  type PathOwner,
+  type PathSeverity,
 } from '@arrranger/shared';
 
 /**
@@ -29,6 +31,14 @@ export interface PathRow {
   readonly expanded: boolean;
   /** True when a level for this node has been fetched. */
   readonly hasLevel: boolean;
+  /**
+   * The worst severity *inside* this node, when its level has been fetched; null when it
+   * has not, because "nothing fetched" is not "nothing wrong".
+   *
+   * A node cannot carry this itself - its children are a separate request - but a level
+   * is exactly "what is in this directory", and the store already indexes levels by path.
+   */
+  readonly childSeverity: PathSeverity | null;
 }
 
 export interface FlattenInput {
@@ -65,6 +75,10 @@ export function flattenLevels(input: FlattenInput): PathRow[] {
     if (level === undefined) return;
 
     for (const node of level.nodes) {
+      // This view manages folders, not media files: a plain file sitting in an otherwise
+      // ordinary directory is never a row here, in either the tree or the flat list.
+      if (node.kind === 'file') continue;
+
       const childKey = node.path;
       const hasLevel = input.levels[childKey] !== undefined;
       const isExpanded = expanded.has(childKey) && hasLevel;
@@ -78,6 +92,7 @@ export function flattenLevels(input: FlattenInput): PathRow[] {
         level: null,
         expanded: isExpanded,
         hasLevel,
+        childSeverity: hasLevel ? input.levels[childKey]?.rollup.severity ?? null : null,
       });
 
       if (isExpanded) walk(childKey, depth + 1);
@@ -95,6 +110,7 @@ export function flattenLevels(input: FlattenInput): PathRow[] {
         level: child,
         expanded: false,
         hasLevel: true,
+        childSeverity: null,
       });
     }
   };
@@ -102,6 +118,66 @@ export function flattenLevels(input: FlattenInput): PathRow[] {
   const root = input.focus === null ? TOP_LEVEL : input.focus;
   walk(root, 0);
   return rows;
+}
+
+/**
+ * The flat alternative to {@link flattenLevels}: every leaf *folder* under the root, in
+ * one list, with no nesting - depth is always 0, which is also what makes a node's own
+ * label logic (`depth === 0` ⇒ full path) show the whole path for free.
+ *
+ * A leaf is a folder with no *sub*folders - which is not the same thing as a folder with
+ * no children. A folder holding 172 episode files and nothing else is the deepest folder
+ * on that branch, and is exactly what this list is for; the server calls it `expandable`
+ * (it has entries), so leaf-ness is decided from its fetched level - does it contain a
+ * directory? - and never from `expandable` alone. A folder whose level was never fetched
+ * is treated as a leaf too: the caller is expected to have crawled everything first (see
+ * `loadFlatView`), so that is a defensive fallback, not the normal path.
+ *
+ * Anything that is not a directory - a file, a symlink - is dropped outright: this is a
+ * folder list, and a level legitimately mixes directory and file candidates together.
+ * Rollup rows are dropped for the same reason: a flat list is only meaningful once
+ * nothing is left summarised.
+ */
+export function flattenLeaves(input: FlattenInput): PathRow[] {
+  const rows: PathRow[] = [];
+  const guard = new Set<string>();
+
+  const walk = (key: string): void => {
+    if (guard.has(key)) return;
+    guard.add(key);
+
+    const level = input.levels[key];
+    if (level === undefined) return;
+
+    for (const node of level.nodes) {
+      if (node.kind !== 'directory') continue;
+
+      const childKey = node.path;
+      const childLevel = input.levels[childKey];
+      const hasLevel = childLevel !== undefined;
+
+      if (childLevel?.nodes.some((child) => child.kind === 'directory') === true) {
+        walk(childKey);
+        continue;
+      }
+
+      rows.push({
+        kind: 'node',
+        key: `leaf:${childKey}`,
+        depth: 0,
+        levelPath: key,
+        node,
+        level: null,
+        expanded: false,
+        hasLevel,
+        childSeverity: null,
+      });
+    }
+  };
+
+  const root = input.focus === null ? TOP_LEVEL : input.focus;
+  walk(root);
+  return rows.sort((a, b) => (a.node?.path ?? '').localeCompare(b.node?.path ?? ''));
 }
 
 /**
@@ -169,42 +245,39 @@ export function rollupChips(level: PathMatrixLevel): RollupChip[] {
   return chips.filter((chip) => chip.count > 0);
 }
 
-/**
- * An `unknown` cell for an instance the response did not mention - a column added since
- * the last fetch. The invariant holds client-side too: never render a gap when unsure.
- */
-export function cellFor(node: PathNode, instanceId: number): PathInstanceCell {
-  return (
-    node.cells.find((cell) => cell.instanceId === instanceId) ?? {
-      instanceId,
-      known: false,
-      role: 'unknown',
-      rootFolderId: null,
-      accessible: null,
-      freeSpace: null,
-      totalSpace: null,
-      mediaUnder: 0,
-      title: null,
-    }
+/** How a severity is rendered. `ok` and `info` are silent - a glyph on every row is noise. */
+export const SEVERITY_STYLES: Record<PathSeverity, { glyph: string; classes: string } | null> = {
+  ok: null,
+  info: null,
+  warn: { glyph: '\u26a0', classes: 'text-drift' },
+  error: { glyph: '\u2715', classes: 'text-danger' },
+};
+
+/** The worst of a set - `PATH_SEVERITIES` is ordered, so this is a max. */
+export function worstSeverity(severities: readonly PathSeverity[]): PathSeverity {
+  return severities.reduce<PathSeverity>(
+    (worst, entry) =>
+      PATH_SEVERITIES.indexOf(entry) > PATH_SEVERITIES.indexOf(worst) ? entry : worst,
+    'ok',
   );
 }
 
-
-export function rootFolderCount(node: PathNode): number {
-  return node.cells.filter((cell) => cell.known && cell.role === 'rootFolder').length;
+/**
+ * The instances that did not answer.
+ *
+ * This is where the `unknown` cell went. An instance that could not be read is absent
+ * from every row's `owners`, so without saying so once, an empty Used-by cell would read
+ * as "nobody uses this folder" - exactly the gap-versus-unknown confusion the fleet
+ * matrices refuse to make.
+ */
+export function unknownColumns(
+  columns: readonly PathMatrixColumn[],
+): readonly PathMatrixColumn[] {
+  return columns.filter((column) => !column.reachable);
 }
 
-/** Instances that could take this path as a root folder but do not have it. */
-export function missingRootFolderOn(
-  node: PathNode,
-  targetInstanceIds: readonly number[],
-): number[] {
-  return node.cells
-    .filter(
-      (cell) =>
-        cell.known && cell.role !== 'rootFolder' && targetInstanceIds.includes(cell.instanceId),
-    )
-    .map((cell) => cell.instanceId);
+export function rootFolderOwners(node: PathNode): readonly PathOwner[] {
+  return node.owners.filter((owner) => owner.use === 'rootFolder');
 }
 
 export interface RootFolderCellTarget {
@@ -213,40 +286,58 @@ export interface RootFolderCellTarget {
   readonly path: string;
 }
 
-export function rootFolderTargets(
-  node: PathNode,
-  targetInstanceIds: readonly number[],
-): RootFolderCellTarget[] {
-  return node.cells
-    .filter(
-      (cell) =>
-        cell.known && cell.role === 'rootFolder' && targetInstanceIds.includes(cell.instanceId),
-    )
-    .map((cell) => ({
-      instanceId: cell.instanceId,
-      rootFolderId: cell.rootFolderId ?? 0,
-      path: node.path,
-    }));
+/**
+ * The root folders to remove for a path - one per owning instance.
+ *
+ * No target-selection argument any more: a folder's owners *are* the answer to "which
+ * instance", and the dialog names each one before anything is staged.
+ */
+export function rootFolderTargets(node: PathNode): RootFolderCellTarget[] {
+  return rootFolderOwners(node).map((owner) => ({
+    instanceId: owner.instanceId,
+    rootFolderId: owner.rootFolderId ?? 0,
+    path: node.path,
+  }));
 }
 
 /** Instances tracking media at or under a path, for the relocation warning. */
 export function trackedBy(
   node: PathNode,
-  columns: readonly PathMatrixColumn[],
 ): Array<{ instanceId: number; name: string; mediaCount: number }> {
-  return node.cells
-    .filter((cell) => cell.known && cell.mediaUnder > 0)
-    .map((cell) => ({
-      instanceId: cell.instanceId,
-      name:
-        columns.find((column) => column.instanceId === cell.instanceId)?.name ??
-        `instance ${String(cell.instanceId)}`,
-      mediaCount: cell.mediaUnder,
+  return node.owners
+    .filter((owner) => owner.mediaUnder > 0)
+    .map((owner) => ({
+      instanceId: owner.instanceId,
+      name: owner.name,
+      mediaCount: owner.mediaUnder,
     }));
 }
 
+/**
+ * What the Media column says: the title when exactly one instance tracks an item here,
+ * otherwise how many items the owners hold at or under it.
+ *
+ * Summed rather than maxed, and broken down in the tooltip, because a 4K/HD split has two
+ * instances counting the same films and neither number alone is the truth.
+ */
+export function mediaSummary(node: PathNode): { label: string; detail: string } | null {
+  if (node.owners.length === 0) return null;
+
+  const tracked = node.owners.filter((owner) => owner.use === 'tracked');
+  const detail = node.owners
+    .map((owner) => `${owner.name}: ${String(owner.mediaUnder)} item(s)`)
+    .join('\n');
+
+  if (tracked.length === 1 && tracked[0]?.title !== null) {
+    return { label: tracked[0]?.title ?? '', detail };
+  }
+
+  const total = node.owners.reduce((sum, owner) => sum + owner.mediaUnder, 0);
+  return total === 0 ? null : { label: String(total), detail };
+}
+
 export type PathAction =
-  | 'propagate'
+  | 'addRoot'
   | 'remove'
   | 'remap'
   | 'reconcile'
@@ -257,7 +348,11 @@ export type PathAction =
   | 'focus';
 
 /**
- * A row offers exactly what its roles allow.
+ * A row offers exactly what the folder itself allows.
+ *
+ * There is no target-instance argument: the folder's own `owners` answer "which instance"
+ * for everything that removes or realigns, and the dialogs ask for everything that adds.
+ * That is what lets the fleet bar be a filter rather than a hidden action target.
  *
  * Note what is deliberately absent: renaming an individual *media* folder is offered as
  * a plain disk rename, never as an align chain. `media.moveRootFolder` only sets
@@ -265,27 +360,21 @@ export type PathAction =
  * the current operation set can make *Arr adopt a renamed media folder - it would report
  * the item missing instead. Offering one would be a lie dressed as a feature.
  */
-export function actionsFor(
-  node: PathNode,
-  targetInstanceIds: readonly number[],
-): PathAction[] {
+export function actionsFor(node: PathNode): PathAction[] {
   const flags = new Set<PathFlag>(node.flags);
+  const rootFolders = rootFolderOwners(node);
   const actions: PathAction[] = [];
 
   // Nothing on disk to act on, and no path to browse into.
-  if (flags.has('unseen')) {
-    return rootFolderTargets(node, targetInstanceIds).length > 0 ? ['remove'] : [];
-  }
+  if (flags.has('unseen')) return rootFolders.length > 0 ? ['remove'] : [];
 
-  if (missingRootFolderOn(node, targetInstanceIds).length > 0) actions.push('propagate');
-  if (rootFolderTargets(node, targetInstanceIds).length > 0) actions.push('remove');
+  if (node.canAddRootFolder) actions.push('addRoot');
+  if (rootFolders.length > 0) actions.push('remove');
 
   if (flags.has('rootFolder')) {
-    if (node.cells.some((cell) => cell.role === 'rootFolder' && cell.mediaUnder > 0)) {
-      actions.push('remap');
-    }
+    if (rootFolders.some((owner) => owner.mediaUnder > 0)) actions.push('remap');
     actions.push('reconcile');
-  } else if (node.cells.some((cell) => cell.known && cell.role === 'tracked')) {
+  } else if (node.owners.some((owner) => owner.use === 'tracked')) {
     actions.push('reconcile');
   }
 
@@ -295,8 +384,10 @@ export function actionsFor(
     actions.push('mkdir');
     if (!flags.has('mount')) {
       actions.push('rename', 'move');
-      // Pruning is only offered when nothing anywhere would lose media by it.
-      if (node.cells.every((cell) => !cell.known || cell.mediaUnder === 0)) actions.push('prune');
+      // Pruning is only offered when nothing anywhere would lose media by it. An instance
+      // that did not answer is not an owner, so it contributes no media - the same
+      // conclusion the old `!cell.known || cell.mediaUnder === 0` check reached.
+      if (!node.owners.some((owner) => owner.mediaUnder > 0)) actions.push('prune');
     }
     if (node.expandable) actions.push('focus');
   }

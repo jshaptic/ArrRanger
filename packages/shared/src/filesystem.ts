@@ -99,26 +99,18 @@ export interface MappingMismatch {
 // ------------------------------------------------------------- path matrix
 
 /**
- * The joined view of storage: one row per path, one column per instance.
+ * The joined view of storage: one row per folder, managed and monitored in its own right.
  *
- * The join happens on the server because only it holds every instance's whole media
+ * A folder is essentially never reused by two instances - each roots at its own subtree -
+ * so the instances that use one are a column (`owners`), not the axis.
+ *
+ * The join still happens on the server because only it holds every instance's whole media
  * path set - the web app could never answer "how many media items live under this
  * folder, on which instances" without downloading the fleet's entire library.
  */
 
-/**
- * What one instance believes about one path, lowest precedence first.
- *
- * `unknown` is load-bearing: an instance that did not answer is never rendered as a
- * configuration gap - the same invariant `cell.known` enforces in the fleet matrices.
- */
-export const PATH_ROLES = [
-  /** Did not answer. Unknown, deliberately NOT "missing". */
-  'unknown',
-  /** Not at, under or above any of its root folders - it has no opinion. */
-  'outside',
-  /** Inside one of its root folders, but it tracks nothing at or under this path. */
-  'inside',
+/** How one instance uses one path, lowest precedence first. */
+export const PATH_USES = [
   /** It has media strictly *under* this path - the folder's reason to exist. */
   'ancestor',
   /** It has a media item at exactly this path. */
@@ -126,24 +118,41 @@ export const PATH_ROLES = [
   /** It has a root folder at exactly this path. */
   'rootFolder',
 ] as const;
-export type PathRole = (typeof PATH_ROLES)[number];
+export type PathUse = (typeof PATH_USES)[number];
 
-export interface PathInstanceCell {
+/**
+ * One instance's claim on one path. Usually there is exactly one per row.
+ *
+ * An instance that uses a path in none of those ways is simply absent from `owners`. So is
+ * one that did not answer - which is why `PathMatrixColumn.reachable` is load-bearing: the
+ * view must say "1 instance did not answer" rather than let an empty Used-by cell read as
+ * "nobody uses this". That is the same `unknown` is never `missing` invariant the fleet
+ * matrices enforce with `cell.known`, moved from per cell to once per response.
+ */
+export interface PathOwner {
   readonly instanceId: number;
-  /** False when the instance did not answer; `role` is then always 'unknown'. */
-  readonly known: boolean;
-  readonly role: PathRole;
-  /** Set when role === 'rootFolder' - needed to stage a delete or a re-map. */
+  /** Denormalised so a chip renders without joining against `columns`. */
+  readonly name: string;
+  readonly kind: 'radarr' | 'sonarr';
+  readonly use: PathUse;
+  /** Set when use === 'rootFolder' - needed to stage a delete or a re-map. */
   readonly rootFolderId: number | null;
   /** *Arr's own verdict on the mount. Null unless it reports a root folder here. */
   readonly accessible: boolean | null;
-  readonly freeSpace: number | null;
-  readonly totalSpace: number | null;
-  /** Media items at or under this path - the "is this folder in use" number. */
+  /** Media items this instance tracks at or under this path. */
   readonly mediaUnder: number;
   /** Title of the media item at this exact path, when there is one. */
   readonly title: string | null;
 }
+
+/**
+ * The worst thing known about a path, so a collapsed tree can show a glyph at a glance.
+ *
+ * Derived server-side from the same flags the badges come from, for the same reason: one
+ * vocabulary, one place.
+ */
+export const PATH_SEVERITIES = ['ok', 'info', 'warn', 'error'] as const;
+export type PathSeverity = (typeof PATH_SEVERITIES)[number];
 
 export type PathNodeKind = 'directory' | 'file' | 'symlink' | 'other';
 
@@ -205,6 +214,15 @@ export interface PathRollup {
   readonly unreadable: number | null;
   /** Media items at or under this path, summed across reachable instances. */
   readonly mediaUnder: number;
+  /**
+   * The worst severity among this directory's entries, so a collapsed row can warn that
+   * something inside needs attention.
+   *
+   * Derived from the dirent list plus the index only, exactly like the counts above, so
+   * the problems that need a readdir or access check per child (`empty`, `unreadable`,
+   * `readOnly`) are reflected only when the level reports `childCountsResolved`.
+   */
+  readonly severity: PathSeverity;
 }
 
 export interface PathNode {
@@ -223,15 +241,35 @@ export interface PathNode {
   readonly writable: boolean;
   /** Filesystem id: a move between two different devices cannot be a rename. */
   readonly deviceId: string | null;
-  /** Mounts only - a statfs per row would be pointless work. */
+  /**
+   * Free/total space of the filesystem this path is on.
+   *
+   * Resolved by device id, one statfs per distinct filesystem per request and seeded from
+   * the FS_ROOTS mounts - so the common single-`/data`-volume layout costs no extra
+   * syscalls at all. A row that was not probed inherits its containing mount's numbers.
+   */
   readonly freeSpace: number | null;
   readonly totalSpace: number | null;
+  /**
+   * This path's filesystem is below the configured low-space threshold.
+   *
+   * Only ever set on a mount or a root folder: every row under one shares its filesystem,
+   * so flagging them all would paint a whole library amber and say nothing actionable.
+   */
+  readonly lowSpace: boolean;
   /** File size, or a *previously measured* directory size. Never triggers a walk. */
   readonly sizeOnDisk: number | null;
   readonly error: string | null;
   // ---------------------------------------------------------------------- the join
-  readonly cells: readonly PathInstanceCell[];
+  /** Instances that use this exact path, highest precedence first. Usually one. */
+  readonly owners: readonly PathOwner[];
   readonly flags: readonly PathFlag[];
+  readonly severity: PathSeverity;
+  /**
+   * At least one reachable instance has no root folder here, and this path could hold one.
+   * Gates the "add root folder" action - the dialog then decides *which* instances.
+   */
+  readonly canAddRootFolder: boolean;
   /** Null for files and for nodes that are not on disk. */
   readonly rollup: PathRollup | null;
   /** True when this node has, or may have, children worth expanding. */
@@ -285,7 +323,12 @@ export interface PathMatrixColumn {
   readonly instanceId: number;
   readonly name: string;
   readonly kind: 'radarr' | 'sonarr';
-  /** False when the instance did not answer: every one of its cells is 'unknown'. */
+  /**
+   * False when the instance did not answer.
+   *
+   * Load-bearing: an unreachable instance is absent from every row's `owners`, so without
+   * this the view could not tell "nobody uses this folder" from "we could not ask".
+   */
   readonly reachable: boolean;
   readonly error: string | null;
   readonly fetchedAt: string | null;

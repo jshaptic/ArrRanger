@@ -30,6 +30,10 @@ export function testConfig(configDir: string, overrides: Partial<AppConfig> = {}
     trustProxy: false,
     corsOrigins: [],
     fsRoots: [],
+    // A temp dir on a developer's disk is never within 50 GiB of full in a way that says
+    // anything, so the default here is "never low" and the tests that care set it.
+    lowSpaceBytes: 0,
+    lowSpacePercent: 0,
     secret: 'test-secret-not-for-production',
     ...overrides,
   };

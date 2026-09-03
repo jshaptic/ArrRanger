@@ -8,35 +8,48 @@ import { pluralise } from '@/lib/format';
 const props = defineProps<{
   level: PathMatrixLevel;
   depth: number;
-  columns: number;
   busy: boolean;
   /** The active name filter, so the line can say what it is really describing. */
   filter: string;
+  /** The instances the tree is filtered to, if any - same reason as `filter`. */
+  instanceNames: readonly string[];
 }>();
+
+/** Path, Used by, Media, Size, Modified, Free, State, actions - minus the row header. */
+const COLUMNS_AFTER_HEADER = 7;
 
 const emit = defineEmits<{ showAll: []; showMore: [] }>();
 
 const filtering = computed(() => props.filter.trim().length > 0);
+const scoped = computed(() => props.instanceNames.length > 0);
 const shown = computed(() => props.level.offset + props.level.nodes.length);
 
 /**
  * One plain sentence about why the rows above are not the whole folder.
  *
- * Filtering and paging are different statements: during a search the folder's own state
- * counts describe entries that are not on screen, so they are left out entirely.
+ * Filtering, scoping and paging are different statements: while a search or an instance
+ * filter is on, the folder's own state counts describe entries that are not on screen, so
+ * they are left out entirely rather than describing rows nobody can see.
  */
 const sentence = computed(() => {
   // pluralise() carries the count itself, e.g. "814 folders".
   const total = pluralise(props.level.rollup.entries, 'folder');
+  const matched = String(props.level.matched);
 
+  // The name filter is the more specific statement, so it leads; the instance names are
+  // appended rather than replacing it.
   if (filtering.value) {
-    return `${String(props.level.matched)} of ${total} here match “${props.filter.trim()}”`;
+    const names = scoped.value ? ` on ${props.instanceNames.join(', ')}` : '';
+    return `${matched} of ${total} here match “${props.filter.trim()}”${names}`;
+  }
+  if (scoped.value) {
+    return `${matched} of ${total} here belong to ${props.instanceNames.join(', ')}`;
   }
   return `showing ${String(shown.value)} of ${total} here`;
 });
 
 /** State counts, but only when they describe what the rows above actually are. */
-const chips = computed(() => (filtering.value ? [] : rollupChips(props.level)));
+const chips = computed(() => (filtering.value || scoped.value ? [] : rollupChips(props.level)));
 </script>
 
 <template>
@@ -60,7 +73,7 @@ const chips = computed(() => (filtering.value ? [] : rollupChips(props.level)));
       </div>
     </th>
 
-    <td :colspan="columns" class="border-l border-line px-2 py-1.5">
+    <td :colspan="COLUMNS_AFTER_HEADER" class="border-l border-line px-2 py-1.5">
       <div class="flex flex-wrap items-center justify-end gap-1">
         <BaseButton v-if="level.truncated" size="sm" variant="ghost" :loading="busy" @click="emit('showMore')">
           show more

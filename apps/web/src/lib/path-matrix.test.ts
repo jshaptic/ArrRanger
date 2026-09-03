@@ -1,23 +1,27 @@
 import type {
   PathFlag,
-  PathInstanceCell,
   PathMatrixColumn,
   PathMatrixLevel,
   PathNode,
-  PathRole,
+  PathOwner,
   PathRollup,
+  PathUse,
 } from '@arrranger/shared';
 import { describe, expect, it } from 'vitest';
 import {
   actionsFor,
-  cellFor,
+  flattenLeaves,
   flattenLevels,
   levelKey,
+  mediaSummary,
   needsRollupRow,
   rollupChips,
   rootFolderTargets,
+  SEVERITY_STYLES,
   TOP_LEVEL,
   trackedBy,
+  unknownColumns,
+  worstSeverity,
 } from './path-matrix';
 
 function rollup(overrides: Partial<PathRollup> = {}): PathRollup {
@@ -33,21 +37,21 @@ function rollup(overrides: Partial<PathRollup> = {}): PathRollup {
     empty: null,
     unreadable: null,
     mediaUnder: 0,
+    severity: 'ok',
     ...overrides,
   };
 }
 
-function cell(instanceId: number, role: PathRole, overrides: Partial<PathInstanceCell> = {}): PathInstanceCell {
+function owner(instanceId: number, use: PathUse, overrides: Partial<PathOwner> = {}): PathOwner {
   return {
     instanceId,
-    known: role !== 'unknown',
-    role,
-    rootFolderId: role === 'rootFolder' ? instanceId * 10 : null,
-    accessible: role === 'rootFolder' ? true : null,
-    freeSpace: role === 'rootFolder' ? 1024 : null,
-    totalSpace: role === 'rootFolder' ? 2048 : null,
-    mediaUnder: role === 'tracked' || role === 'ancestor' ? 1 : 0,
-    title: role === 'tracked' ? 'A Title' : null,
+    name: `instance ${String(instanceId)}`,
+    kind: 'radarr',
+    use,
+    rootFolderId: use === 'rootFolder' ? instanceId * 10 : null,
+    accessible: use === 'rootFolder' ? true : null,
+    mediaUnder: use === 'rootFolder' ? 0 : 1,
+    title: use === 'tracked' ? 'A Title' : null,
     ...overrides,
   };
 }
@@ -67,10 +71,13 @@ function node(path: string, overrides: Partial<PathNode> = {}): PathNode {
     deviceId: '1',
     freeSpace: null,
     totalSpace: null,
+    lowSpace: false,
     sizeOnDisk: null,
     error: null,
-    cells: [],
+    owners: [],
     flags: [],
+    severity: 'ok',
+    canAddRootFolder: true,
     rollup: null,
     expandable: true,
     ...overrides,
@@ -150,10 +157,136 @@ describe('flattenLevels', () => {
     expect(flattenLevels({ levels, expanded: [], focus: '/nowhere' })).toEqual([]);
   });
 
+  it('carries the worst severity inside a node, so a collapsed row can warn', () => {
+    const withProblem = {
+      [TOP_LEVEL]: level(null, [node('/data')]),
+      '/data': level('/data', [node('/data/media')], { rollup: rollup({ severity: 'error' }) }),
+    };
+    const rows = flattenLevels({ levels: withProblem, expanded: [], focus: null });
+
+    // /data is collapsed, but its level is loaded and holds something broken.
+    expect(rows[0]?.childSeverity).toBe('error');
+  });
+
+  it('reports no child severity for a node whose level was never fetched', () => {
+    // "Nothing fetched" is not "nothing wrong" - the row must not claim it is clean.
+    const rows = flattenLevels({
+      levels: { [TOP_LEVEL]: level(null, [node('/data')]) },
+      expanded: [],
+      focus: null,
+    });
+
+    expect(rows[0]?.childSeverity).toBeNull();
+  });
+
   it('survives a level that points back at itself', () => {
     const looped = { '/a': level('/a', [node('/a')]) };
     const rows = flattenLevels({ levels: looped, expanded: ['/a'], focus: '/a' });
     expect(rows.length).toBeLessThan(5);
+  });
+
+  it('never shows a plain file - this view manages folders, not media files', () => {
+    const withAFile = {
+      [TOP_LEVEL]: level(null, [node('/data')]),
+      '/data': level('/data', [
+        node('/data/media'),
+        node('/data/movie.mkv', { kind: 'file', expandable: false }),
+      ]),
+    };
+    const rows = flattenLevels({ levels: withAFile, expanded: ['/data'], focus: null });
+
+    expect(rows.map((row) => row.node?.path)).toEqual(['/data', '/data/media']);
+  });
+});
+
+describe('flattenLeaves', () => {
+  const levels = {
+    [TOP_LEVEL]: level(null, [node('/data')]),
+    '/data': level('/data', [
+      node('/data/media'),
+      node('/data/other', { expandable: false }),
+    ]),
+    '/data/media': level('/data/media', [node('/data/media/movies', { expandable: false })]),
+  };
+
+  it('lists only the leaves, flat, in path order', () => {
+    const rows = flattenLeaves({ levels, expanded: [], focus: null });
+
+    expect(rows.map((row) => [row.node?.path, row.depth])).toEqual([
+      ['/data/media/movies', 0],
+      ['/data/other', 0],
+    ]);
+  });
+
+  it('drops files and other non-directories - this is a folder list', () => {
+    const withAFile = {
+      ...levels,
+      '/data': level('/data', [
+        node('/data/media'),
+        node('/data/other', { expandable: false }),
+        node('/data/movie.mkv', { kind: 'file', expandable: false }),
+        node('/data/link', { kind: 'symlink', expandable: false }),
+      ]),
+    };
+    const rows = flattenLeaves({ levels: withAFile, expanded: [], focus: null });
+
+    expect(rows.map((row) => row.node?.path)).toEqual(['/data/media/movies', '/data/other']);
+  });
+
+  it('ignores the expanded set entirely - it walks every fetched level regardless', () => {
+    const withoutExpanded = flattenLeaves({ levels, expanded: [], focus: null });
+    const withExpanded = flattenLeaves({ levels, expanded: ['/data', '/data/media'], focus: null });
+    expect(withoutExpanded).toEqual(withExpanded);
+  });
+
+  it('re-roots at the focused path, same as flattenLevels', () => {
+    const rows = flattenLeaves({ levels, expanded: [], focus: '/data/media' });
+    expect(rows.map((row) => row.node?.path)).toEqual(['/data/media/movies']);
+  });
+
+  it('falls back to showing an unfetched expandable node rather than dropping it', () => {
+    const partial = { [TOP_LEVEL]: level(null, [node('/data')]) };
+    const rows = flattenLeaves({ levels: partial, expanded: [], focus: null });
+    expect(rows.map((row) => row.node?.path)).toEqual(['/data']);
+  });
+
+  it('keeps a folder that holds only files - it is the deepest folder, not a branch', () => {
+    // The real case this got wrong: /data/media/onepiece holds 172 episode files and no
+    // subfolder. The server calls it expandable (it has entries), so walking into it and
+    // then dropping its files left the folder itself with no row at all.
+    const withEpisodes = {
+      [TOP_LEVEL]: level(null, [node('/data')]),
+      '/data': level('/data', [node('/data/onepiece')]),
+      '/data/onepiece': level('/data/onepiece', [
+        node('/data/onepiece/ep01.mp4', { kind: 'file', expandable: false }),
+        node('/data/onepiece/ep02.mp4', { kind: 'file', expandable: false }),
+      ]),
+    };
+    const rows = flattenLeaves({ levels: withEpisodes, expanded: [], focus: null });
+
+    expect(rows.map((row) => row.node?.path)).toEqual(['/data/onepiece']);
+  });
+
+  it('walks past a folder that holds subfolders, even when it also holds files', () => {
+    const mixed = {
+      [TOP_LEVEL]: level(null, [node('/data')]),
+      '/data': level('/data', [node('/data/media')]),
+      '/data/media': level('/data/media', [
+        node('/data/media/movies'),
+        node('/data/media/stray.mkv', { kind: 'file', expandable: false }),
+      ]),
+      '/data/media/movies': level('/data/media/movies', [
+        node('/data/media/movies/film.mkv', { kind: 'file', expandable: false }),
+      ]),
+    };
+    const rows = flattenLeaves({ levels: mixed, expanded: [], focus: null });
+
+    expect(rows.map((row) => row.node?.path)).toEqual(['/data/media/movies']);
+  });
+
+  it('survives a level that points back at itself', () => {
+    const looped = { '/a': level('/a', [node('/a')]) };
+    expect(flattenLeaves({ levels: looped, expanded: [], focus: '/a' }).length).toBeLessThan(5);
   });
 });
 
@@ -209,57 +342,57 @@ describe('the big-folder rollup row', () => {
   });
 });
 
-describe('cellFor', () => {
-  it('finds the cell for an instance', () => {
-    const target = node('/data', { cells: [cell(1, 'rootFolder'), cell(2, 'outside')] });
-    expect(cellFor(target, 2).role).toBe('outside');
-  });
-
-  it('is unknown for an instance the response never mentioned', () => {
-    const target = node('/data', { cells: [cell(1, 'rootFolder')] });
-    const missing = cellFor(target, 99);
-
-    expect(missing.known).toBe(false);
-    expect(missing.role).toBe('unknown');
-  });
-});
-
 describe('actionsFor', () => {
-  const targets = [1, 2];
-
-  const flagged = (path: string, flags: PathFlag[], cells: PathInstanceCell[]): PathNode =>
-    node(path, { flags, cells });
+  const flagged = (path: string, flags: PathFlag[], owners: PathOwner[]): PathNode =>
+    node(path, { flags, owners, canAddRootFolder: false });
 
   it('offers the root-folder actions on a root folder that holds media', () => {
     const target = flagged('/data/media/movies', ['rootFolder'], [
-      cell(1, 'rootFolder', { mediaUnder: 806 }),
-      cell(2, 'outside'),
+      owner(1, 'rootFolder', { mediaUnder: 806 }),
     ]);
 
-    expect(actionsFor(target, targets)).toEqual(
-      expect.arrayContaining(['propagate', 'remove', 'remap', 'reconcile']),
+    expect(actionsFor(target)).toEqual(
+      expect.arrayContaining(['remove', 'remap', 'reconcile']),
     );
   });
 
   it('offers the disk actions on a folder nobody roots', () => {
-    const target = flagged('/data/media/old-movies', ['candidate'], [cell(1, 'outside'), cell(2, 'outside')]);
-    const actions = actionsFor(target, targets);
+    const target = node('/data/media/old-movies', { flags: ['candidate'], owners: [] });
+    const actions = actionsFor(target);
 
-    expect(actions).toEqual(expect.arrayContaining(['propagate', 'rename', 'move', 'prune']));
+    expect(actions).toEqual(expect.arrayContaining(['addRoot', 'rename', 'move', 'prune']));
     expect(actions).not.toContain('remove');
     expect(actions).not.toContain('remap');
   });
 
+  it('offers addRoot only when the server says the path could take one', () => {
+    // The server owns this decision: it is the only side that knows every instance's
+    // root folders, and the old client-side version needed a target selection to guess.
+    const already = node('/data/media/movies', {
+      flags: ['rootFolder'],
+      owners: [owner(1, 'rootFolder')],
+      canAddRootFolder: false,
+    });
+    expect(actionsFor(already)).not.toContain('addRoot');
+    expect(actionsFor(node('/data/media/spare', { canAddRootFolder: true }))).toContain('addRoot');
+  });
+
   it('never offers a prune that would cost an instance its media', () => {
-    const tracked = flagged('/data/media/movies/Dune (2021)', ['rootFolder'], [
-      cell(1, 'tracked', { mediaUnder: 1 }),
+    const tracked = flagged('/data/media/movies/Dune (2021)', [], [
+      owner(1, 'tracked', { mediaUnder: 1 }),
     ]);
-    expect(actionsFor(tracked, targets)).not.toContain('prune');
+    expect(actionsFor(tracked)).not.toContain('prune');
+  });
+
+  it('prunes a folder no owner holds media under - an unreachable instance is not an owner', () => {
+    // The old check was `cells.every(c => !c.known || c.mediaUnder === 0)`. An instance
+    // that did not answer is absent from `owners` entirely, so it reaches the same answer.
+    expect(actionsFor(node('/data/media/spare', { owners: [] }))).toContain('prune');
   });
 
   it('offers align on a tracked media folder, but not a re-map', () => {
-    const target = flagged('/data/media/movies/Dune (2021)', [], [cell(1, 'tracked')]);
-    const actions = actionsFor(target, targets);
+    const target = flagged('/data/media/movies/Dune (2021)', [], [owner(1, 'tracked')]);
+    const actions = actionsFor(target);
 
     expect(actions).toContain('reconcile');
     expect(actions).toContain('rename');
@@ -267,8 +400,8 @@ describe('actionsFor', () => {
   });
 
   it('never offers a disk action on a mount', () => {
-    const mount = flagged('/data', ['mount'], [cell(1, 'ancestor')]);
-    const actions = actionsFor(mount, targets);
+    const mount = flagged('/data', ['mount'], [owner(1, 'ancestor')]);
+    const actions = actionsFor(mount);
 
     expect(actions).not.toContain('rename');
     expect(actions).not.toContain('move');
@@ -281,11 +414,12 @@ describe('actionsFor', () => {
       exists: false,
       origin: 'arr',
       flags: ['missing'],
-      cells: [cell(1, 'tracked')],
+      owners: [owner(1, 'tracked')],
+      canAddRootFolder: false,
     });
 
-    expect(actionsFor(missing, targets)).toContain('mkdir');
-    expect(actionsFor(missing, targets)).not.toContain('prune');
+    expect(actionsFor(missing)).toContain('mkdir');
+    expect(actionsFor(missing)).not.toContain('prune');
   });
 
   it('offers only removal for a root folder this container cannot see', () => {
@@ -294,35 +428,101 @@ describe('actionsFor', () => {
       inScope: false,
       origin: 'arr',
       flags: ['rootFolder', 'unseen'],
-      cells: [cell(1, 'rootFolder')],
+      owners: [owner(1, 'rootFolder')],
+      canAddRootFolder: false,
     });
 
-    expect(actionsFor(unseen, targets)).toEqual(['remove']);
+    expect(actionsFor(unseen)).toEqual(['remove']);
+  });
+});
+
+describe('rootFolderTargets', () => {
+  it('takes its instances from the folder own owners, not from a selection', () => {
+    const shared = node('/data/media/movies', {
+      flags: ['rootFolder'],
+      owners: [owner(1, 'rootFolder'), owner(2, 'rootFolder')],
+    });
+
+    expect(rootFolderTargets(shared)).toEqual([
+      { instanceId: 1, rootFolderId: 10, path: '/data/media/movies' },
+      { instanceId: 2, rootFolderId: 20, path: '/data/media/movies' },
+    ]);
   });
 
-  it('skips instances outside the current target selection', () => {
-    const target = flagged('/data/media/movies', ['rootFolder'], [
-      cell(1, 'rootFolder'),
-      cell(2, 'outside'),
-    ]);
-
-    // Targeting only instance 1: there is no gap to propagate into.
-    expect(actionsFor(target, [1])).not.toContain('propagate');
-    expect(rootFolderTargets(target, [1])).toEqual([
-      { instanceId: 1, rootFolderId: 10, path: '/data/media/movies' },
-    ]);
+  it('ignores an owner that merely holds media here', () => {
+    const target = node('/data/media/old-movies', { owners: [owner(1, 'ancestor')] });
+    expect(rootFolderTargets(target)).toEqual([]);
   });
 });
 
 describe('trackedBy', () => {
   it('names the instances that would lose media, with counts', () => {
     const target = node('/data/media/movies', {
-      cells: [cell(1, 'rootFolder', { mediaUnder: 806 }), cell(2, 'outside')],
+      owners: [owner(1, 'rootFolder', { name: 'Radarr-4K', mediaUnder: 806 })],
     });
 
-    expect(trackedBy(target, [column(1, { name: 'Radarr-4K' }), column(2)])).toEqual([
-      { instanceId: 1, name: 'Radarr-4K', mediaCount: 806 },
-    ]);
+    // No column list to join against any more - the owner carries its own name.
+    expect(trackedBy(target)).toEqual([{ instanceId: 1, name: 'Radarr-4K', mediaCount: 806 }]);
+  });
+
+  it('says nothing about a folder no instance holds media under', () => {
+    expect(trackedBy(node('/data/media/spare', { owners: [] }))).toEqual([]);
+  });
+});
+
+describe('severity', () => {
+  it('is silent for ok and info - a glyph on every row would be noise', () => {
+    expect(SEVERITY_STYLES.ok).toBeNull();
+    expect(SEVERITY_STYLES.info).toBeNull();
+    expect(SEVERITY_STYLES.warn?.classes).toContain('drift');
+    expect(SEVERITY_STYLES.error?.classes).toContain('danger');
+  });
+
+  it('takes the worst of a set, in order', () => {
+    expect(worstSeverity(['ok', 'info', 'warn'])).toBe('warn');
+    expect(worstSeverity(['warn', 'error', 'info'])).toBe('error');
+    expect(worstSeverity([])).toBe('ok');
+    expect(worstSeverity(['ok'])).toBe('ok');
+  });
+});
+
+describe('unknownColumns', () => {
+  it('names the instances that did not answer, so an empty row is not read as "nobody"', () => {
+    const columns = [column(1), column(2, { reachable: false, error: 'unreachable' })];
+    expect(unknownColumns(columns).map((entry) => entry.instanceId)).toEqual([2]);
+  });
+
+  it('is empty when the whole fleet answered', () => {
+    expect(unknownColumns([column(1), column(2)])).toEqual([]);
+  });
+});
+
+describe('mediaSummary', () => {
+  it('names the item when exactly one instance tracks one at this path', () => {
+    const target = node('/data/media/movies/Dune (2021)', {
+      owners: [owner(1, 'tracked', { title: 'Dune', mediaUnder: 1 })],
+    });
+    expect(mediaSummary(target)?.label).toBe('Dune');
+  });
+
+  it('sums across owners, and breaks the sum down in the detail', () => {
+    // A 4K/HD split counts the same films twice; neither number alone is the truth, so
+    // the total leads and the tooltip says who contributed what.
+    const target = node('/data/media/movies', {
+      owners: [
+        owner(1, 'rootFolder', { name: 'Radarr', mediaUnder: 384 }),
+        owner(2, 'rootFolder', { name: 'Radarr-4K', mediaUnder: 112 }),
+      ],
+    });
+
+    const summary = mediaSummary(target);
+    expect(summary?.label).toBe('496');
+    expect(summary?.detail).toContain('Radarr: 384 item(s)');
+    expect(summary?.detail).toContain('Radarr-4K: 112 item(s)');
+  });
+
+  it('says nothing for a folder nobody uses', () => {
+    expect(mediaSummary(node('/data/media/spare', { owners: [] }))).toBeNull();
   });
 });
 

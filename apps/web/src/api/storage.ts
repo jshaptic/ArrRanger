@@ -16,6 +16,8 @@ export interface MatrixParams {
   readonly filter?: string;
   readonly limit?: number;
   readonly offset?: number;
+  /** Show only these instances' folders. Empty means the whole fleet. */
+  readonly instanceIds?: readonly number[];
   readonly refresh?: boolean;
 }
 
@@ -27,6 +29,8 @@ function matrixQuery(params: MatrixParams): string {
   if (params.filter !== undefined && params.filter.length > 0) query.set('q', params.filter);
   if (params.limit !== undefined) query.set('limit', String(params.limit));
   if (params.offset !== undefined && params.offset > 0) query.set('offset', String(params.offset));
+  // Repeatable too: one filtered request for every open level, not one per instance.
+  for (const instanceId of params.instanceIds ?? []) query.append('instance', String(instanceId));
   if (params.refresh === true) query.set('refresh', 'true');
 
   const serialised = query.toString();

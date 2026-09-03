@@ -5,10 +5,15 @@ import BaseModal from '@/components/base/BaseModal.vue';
 import { useMatrixStore } from '@/stores/matrix';
 import { useQueueStore } from '@/stores/queue';
 
-const props = withDefaults(defineProps<{ path?: string; preselect?: readonly number[] }>(), {
-  path: '',
-  preselect: () => [],
-});
+/**
+ * `paths` is the batch form: several selected folders staged against the same instances,
+ * one `rootFolder.create` per pair. `path` stays for the single-row case, where the field
+ * is editable so a path can be typed by hand.
+ */
+const props = withDefaults(
+  defineProps<{ path?: string; paths?: readonly string[]; preselect?: readonly number[] }>(),
+  { path: '', paths: () => [], preselect: () => [] },
+);
 
 const emit = defineEmits<{ close: [] }>();
 
@@ -18,16 +23,35 @@ const queue = useQueueStore();
 const path = ref(props.path);
 const selected = ref<number[]>([...props.preselect]);
 
+const batch = computed(() => props.paths.length > 0);
+const targets = computed(() => (batch.value ? [...props.paths] : [path.value.trim()]));
+
 const candidates = computed(() =>
   matrix.healthyColumns.map((column) => ({
     instanceId: column.instance.id,
     name: column.instance.name,
     kind: column.instance.kind,
-    alreadyHas: column.rootFolders.some((folder) => folder.path === path.value.trim()),
+    // In batch mode "already present" is per pair, so it cannot disable the whole row -
+    // the pairs that already exist are simply dropped when staging.
+    alreadyHas: targets.value.every((target) =>
+      column.rootFolders.some((folder) => folder.path === target),
+    ),
   })),
 );
 
-const valid = computed(() => path.value.trim().startsWith('/') && selected.value.length > 0);
+const valid = computed(
+  () => targets.value.every((target) => target.startsWith('/')) && selected.value.length > 0,
+);
+
+/** One create per path x instance, minus the pairs that already exist. */
+const pairs = computed(() =>
+  selected.value.flatMap((instanceId) => {
+    const column = matrix.healthyColumns.find((entry) => entry.instance.id === instanceId);
+    return targets.value
+      .filter((target) => !(column?.rootFolders.some((folder) => folder.path === target) ?? false))
+      .map((target) => ({ instanceId, path: target }));
+  }),
+);
 
 function toggle(instanceId: number): void {
   selected.value = selected.value.includes(instanceId)
@@ -36,10 +60,13 @@ function toggle(instanceId: number): void {
 }
 
 async function confirm(): Promise<void> {
-  const targets = selected.value.filter(
-    (instanceId) => !candidates.value.find((entry) => entry.instanceId === instanceId)?.alreadyHas,
-  );
-  await queue.createRootFolderAcross(path.value.trim(), targets);
+  // Grouped by path so each call keeps its own "on N instance(s)" description.
+  for (const target of targets.value) {
+    const instanceIds = pairs.value
+      .filter((pair) => pair.path === target)
+      .map((pair) => pair.instanceId);
+    if (instanceIds.length > 0) await queue.createRootFolderAcross(target, instanceIds);
+  }
   emit('close');
 }
 </script>
@@ -51,7 +78,18 @@ async function confirm(): Promise<void> {
     @close="emit('close')"
   >
     <div class="space-y-4">
-      <label class="block">
+      <div v-if="batch">
+        <span class="mb-1.5 block text-xs text-muted">
+          {{ paths.length }} folder(s), as the *Arr containers see them
+        </span>
+        <ul class="max-h-40 space-y-0.5 overflow-y-auto rounded-md border border-line bg-raised/40 px-3 py-2">
+          <li v-for="target in paths" :key="target" class="font-mono text-[11px] text-ink">
+            {{ target }}
+          </li>
+        </ul>
+      </div>
+
+      <label v-else class="block">
         <span class="mb-1 block text-xs text-muted">Path (as the *Arr container sees it)</span>
         <input
           v-model="path"
@@ -108,7 +146,7 @@ async function confirm(): Promise<void> {
     <template #footer>
       <BaseButton variant="ghost" @click="emit('close')">Cancel</BaseButton>
       <BaseButton variant="primary" :disabled="!valid" :loading="queue.busy" @click="confirm()">
-        Stage on {{ selected.length }} instance(s)
+        Stage {{ pairs.length }} root folder(s) on {{ selected.length }} instance(s)
       </BaseButton>
     </template>
   </BaseModal>

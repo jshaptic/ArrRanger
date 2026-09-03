@@ -9,6 +9,7 @@ import {
   type PathMatrixResponse,
 } from '@arrranger/shared';
 import type { FastifyPluginAsync } from 'fastify';
+import { PATH_SORTS } from '../services/path-matrix.service.js';
 import { z } from 'zod';
 
 const pathQuery = z.object({ path: z.string().min(1) });
@@ -31,7 +32,17 @@ const matrixQuery = z.object({
   q: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(1000).optional(),
   offset: z.coerce.number().int().min(0).optional(),
-  sort: z.enum(['name', 'interesting', 'modified']).optional(),
+  sort: z.enum(PATH_SORTS).optional(),
+  /** Repeatable, like `path`: show only these instances' folders. */
+  instance: z
+    .union([z.string(), z.array(z.string())])
+    .optional()
+    .transform((value) => (value === undefined ? [] : Array.isArray(value) ? value : [value]))
+    .pipe(z.array(z.string()))
+    .transform((values) => values.map((value) => Number.parseInt(value, 10)))
+    .refine((ids) => ids.every((id) => Number.isInteger(id) && id > 0), {
+      message: 'instance must be a positive integer id',
+    }),
   refresh: z
     .enum(['true', 'false'])
     .optional()
@@ -85,6 +96,7 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
       ...(query.limit === undefined ? {} : { limit: query.limit }),
       ...(query.offset === undefined ? {} : { offset: query.offset }),
       ...(query.sort === undefined ? {} : { sort: query.sort }),
+      ...(query.instance.length === 0 ? {} : { instanceIds: query.instance }),
       refresh: query.refresh,
     });
   });

@@ -4,9 +4,34 @@ import BaseButton from '@/components/base/BaseButton.vue';
 import { formatRelativeTime, initialsOf } from '@/lib/format';
 import { useMatrixStore } from '@/stores/matrix';
 
+/**
+ * `target` - the selection is what batch actions fan out across (tags, import lists).
+ * `filter` - the selection is what the view shows (paths, where a folder has one owner
+ * and the dialogs ask which instance rather than the bar deciding silently).
+ *
+ * The two share `matrix.selectedInstanceIds`, so the copy has to say which it is or the
+ * bar lies on one of the routes.
+ */
+const props = withDefaults(defineProps<{ mode?: 'target' | 'filter' }>(), { mode: 'target' });
+
 const matrix = useMatrixStore();
 
 const KIND_LABEL = { radarr: 'Radarr', sonarr: 'Sonarr' } as const;
+
+const COPY = {
+  target: {
+    active: (selected: number, total: number) => `targeting ${String(selected)} of ${String(total)}`,
+    clear: 'target whole fleet',
+    unreachable: 'instead of "missing", and batch actions skip them.',
+  },
+  filter: {
+    active: (selected: number, total: number) => `showing ${String(selected)} of ${String(total)}`,
+    clear: 'show whole fleet',
+    unreachable: 'instead of "missing", and their folders are not shown.',
+  },
+} as const;
+
+const copy = computed(() => COPY[props.mode]);
 
 const allSelected = computed(() => matrix.selectedInstanceIds.length === 0);
 
@@ -72,7 +97,7 @@ function chipClasses(instanceId: number, status: 'ok' | 'error' | 'loading'): st
 
       <div class="ml-auto flex items-center gap-2">
         <span v-if="!allSelected" class="text-[11px] text-staged">
-          targeting {{ matrix.selectedInstanceIds.length }} of {{ matrix.columns.length }}
+          {{ copy.active(matrix.selectedInstanceIds.length, matrix.columns.length) }}
         </span>
         <BaseButton
           v-if="!allSelected"
@@ -80,7 +105,7 @@ function chipClasses(instanceId: number, status: 'ok' | 'error' | 'loading'): st
           variant="ghost"
           @click="matrix.clearSelection()"
         >
-          target whole fleet
+          {{ copy.clear }}
         </BaseButton>
         <span class="hidden text-[11px] text-faint sm:inline">
           snapshot {{ formatRelativeTime(matrix.lastLoadedAt) }}
@@ -92,8 +117,8 @@ function chipClasses(instanceId: number, status: 'ok' | 'error' | 'loading'): st
     </div>
 
     <p v-if="matrix.failedColumns.length > 0" class="mt-2 text-[11px] text-danger">
-      {{ matrix.failedColumns.length }} instance(s) did not answer - their columns show
-      <span class="font-mono">?</span> instead of "missing", and batch actions skip them.
+      {{ matrix.failedColumns.length }} instance(s) did not answer - they show
+      <span class="font-mono">?</span> {{ copy.unreachable }}
     </p>
   </section>
 </template>

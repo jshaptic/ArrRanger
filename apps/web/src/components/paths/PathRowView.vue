@@ -1,19 +1,26 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { PathMatrixColumn, PathNode, QueueItem } from '@arrranger/shared';
+import type { PathNode, PathSeverity, QueueItem } from '@arrranger/shared';
 import BaseButton from '@/components/base/BaseButton.vue';
-import PathCellView from './PathCellView.vue';
 import PathFlagBadge from './PathFlagBadge.vue';
+import PathOwnerChips from './PathOwnerChips.vue';
 import { formatBytes, formatRelativeTime } from '@/lib/format';
-import { actionsFor, cellFor, type PathAction } from '@/lib/path-matrix';
+import { actionsFor, mediaSummary, SEVERITY_STYLES, type PathAction } from '@/lib/path-matrix';
 import { stagedIntent, TONE_CLASSES } from '@/lib/staging';
 
 const props = defineProps<{
   node: PathNode;
   depth: number;
-  columns: readonly PathMatrixColumn[];
-  targetInstanceIds: readonly number[];
+  /**
+   * A row in the flat list, where there is no tree to walk: no twisty, and no focus, since
+   * both only mean something next to a hierarchy.
+   */
+  flat: boolean;
+  /** Instances that could not be read, so an empty Used-by cell is not read as "nobody". */
+  unknownCount: number;
   expanded: boolean;
+  /** Worst severity inside this node, when its level is loaded. */
+  childSeverity: PathSeverity | null;
   busy: boolean;
   loading: boolean;
   selected: boolean;
@@ -28,12 +35,11 @@ const emit = defineEmits<{
   select: [];
   measure: [];
   action: [action: PathAction];
-  cellCreate: [instanceId: number];
-  cellRemove: [target: { instanceId: number; rootFolderId: number | null }];
+  ownerRemove: [target: { instanceId: number; rootFolderId: number | null }];
 }>();
 
-const ACTION_LABELS: Record<PathAction, string> = {
-  propagate: 'propagate',
+const ACTION_LABELS: Record<Exclude<PathAction, 'focus'>, string> = {
+  addRoot: 'add root folder',
   remove: 'remove',
   remap: 're-map',
   reconcile: 'align',
@@ -41,15 +47,30 @@ const ACTION_LABELS: Record<PathAction, string> = {
   rename: 'rename',
   move: 'move',
   prune: 'prune',
-  focus: 'focus',
 };
 
-const actions = computed(() => actionsFor(props.node, props.targetInstanceIds));
+const allActions = computed(() => actionsFor(props.node));
+/** `focus` gets its own icon next to the name rather than a text button in the actions column. */
+const actions = computed(() => allActions.value.filter((action) => action !== 'focus'));
+const canFocus = computed(() => !props.flat && allActions.value.includes('focus'));
 const intent = computed(() => stagedIntent(props.stagedForPath));
-
+const media = computed(() => mediaSummary(props.node));
 
 /** `mount` drives behaviour (a mount is never renameable) but needs no badge. */
 const badges = computed(() => props.node.flags.filter((flag) => flag !== 'mount'));
+
+const severity = computed(() => SEVERITY_STYLES[props.node.severity]);
+
+/**
+ * A dimmed warning for a collapsed folder whose children need attention, so a problem two
+ * levels down is not invisible until you go looking for it. Only when the row's own state
+ * is quiet - it would be noise next to the row's own glyph.
+ */
+const inheritedSeverity = computed(() => {
+  if (severity.value !== null || props.expanded) return null;
+  if (props.childSeverity === null) return null;
+  return SEVERITY_STYLES[props.childSeverity];
+});
 
 const glyph = computed(() => {
   if (props.loading) return '⋯';
@@ -71,6 +92,27 @@ const nameClasses = computed(() => {
   if (!props.node.exists) return 'text-danger line-through';
   if (intent.value?.tone === 'destroy') return 'text-danger line-through';
   return 'text-ink';
+});
+
+/** The disk facts that do not earn a column of their own, in one tooltip. */
+const diskTitle = computed(() => {
+  const lines = [props.node.path];
+  if (props.node.modifiedAt !== null) lines.push(`modified ${formatRelativeTime(props.node.modifiedAt)}`);
+  if (props.node.exists && props.node.inScope) {
+    lines.push(props.node.readable ? (props.node.writable ? 'read-write' : 'read-only') : 'no read access');
+  }
+  if (props.node.deviceId !== null) lines.push(`filesystem ${props.node.deviceId}`);
+  return lines.join('\n');
+});
+
+const spaceTitle = computed(() => {
+  if (props.node.freeSpace === null) return 'Free space not evaluated for this path';
+  const share =
+    props.node.totalSpace === null || props.node.totalSpace === 0
+      ? ''
+      : ` (${String(Math.round((props.node.freeSpace / props.node.totalSpace) * 100))}%)`;
+  const of = props.node.totalSpace === null ? '' : ` of ${formatBytes(props.node.totalSpace)}`;
+  return `${formatBytes(props.node.freeSpace)} free${of}${share}${props.node.lowSpace ? ' - below the low-space threshold' : ''}`;
 });
 </script>
 
@@ -94,34 +136,62 @@ const nameClasses = computed(() => {
           @change="emit('select')"
         />
 
-        <button
-          type="button"
-          class="w-4 shrink-0 text-left transition-colors hover:text-ink disabled:opacity-30"
-          :class="loading ? 'animate-pulse text-accent' : 'text-faint'"
-          :disabled="!node.expandable || loading"
-          :title="
-            loading
-              ? 'Reading…'
-              : node.expandable
-                ? expanded
-                  ? 'Collapse'
-                  : 'Expand'
-                : 'Nothing to expand - a root folder holds the library, which this view does not manage'
-          "
-          @click="emit('toggle')"
-        >
-          {{ glyph }}
-        </button>
+        <template v-if="!flat">
+          <button
+            v-if="!node.flags.includes('rootFolder')"
+            type="button"
+            class="w-4 shrink-0 text-left transition-colors hover:text-ink disabled:opacity-30"
+            :class="loading ? 'animate-pulse text-accent' : 'text-faint'"
+            :disabled="!node.expandable || loading"
+            :title="
+              loading
+                ? 'Reading…'
+                : node.expandable
+                  ? expanded
+                    ? 'Collapse'
+                    : 'Expand'
+                  : 'Nothing to expand here'
+            "
+            @click="emit('toggle')"
+          >
+            {{ glyph }}
+          </button>
+          <span v-else class="w-4 shrink-0"></span>
+        </template>
 
-        <span class="min-w-0 flex-1 truncate font-mono" :class="nameClasses" :title="node.path">
+        <span
+          v-if="severity"
+          class="shrink-0 text-[11px]"
+          :class="severity.classes"
+          :title="`This folder needs attention: ${badges.join(', ')}`"
+          data-severity="own"
+        >
+          {{ severity.glyph }}
+        </span>
+        <span
+          v-else-if="inheritedSeverity"
+          class="shrink-0 text-[11px] opacity-40"
+          :class="inheritedSeverity.classes"
+          title="Something inside this folder needs attention"
+          data-severity="child"
+        >
+          {{ inheritedSeverity.glyph }}
+        </span>
+
+        <span class="min-w-0 flex-1 truncate font-mono" :class="nameClasses" :title="diskTitle">
           {{ label }}
         </span>
 
-        <span v-if="node.childCount !== null" class="shrink-0 text-[10px] text-faint">
-          {{ node.childCount }}
-        </span>
-
-        <PathFlagBadge v-for="flag in badges" :key="flag" :flag="flag" />
+        <button
+          v-if="canFocus"
+          type="button"
+          class="shrink-0 text-[11px] text-faint transition-colors hover:text-accent"
+          title="Focus: re-root this view at this folder"
+          :disabled="busy"
+          @click="emit('action', 'focus')"
+        >
+          ⌖
+        </button>
 
         <span
           v-if="intent"
@@ -133,6 +203,20 @@ const nameClasses = computed(() => {
         </span>
       </div>
     </th>
+
+    <PathOwnerChips
+      :owners="node.owners"
+      :path="node.path"
+      :unknown-count="unknownCount"
+      :staged="stagedForCell"
+      @remove="emit('ownerRemove', $event)"
+    />
+
+    <!-- media -->
+    <td class="border-b border-l border-line px-2 py-1.5 text-[11px] text-muted">
+      <span v-if="media" class="truncate" :title="media.detail">{{ media.label }}</span>
+      <span v-else class="text-faint">—</span>
+    </td>
 
     <!-- disk facts -->
     <td class="border-b border-l border-line px-2 py-1.5 font-mono text-[11px] text-muted">
@@ -149,25 +233,26 @@ const nameClasses = computed(() => {
       </button>
       <span v-else>—</span>
     </td>
-    <td class="border-b border-l border-line px-2 py-1.5 text-[11px] text-muted whitespace-nowrap">
-      {{ node.freeSpace !== null ? `${formatBytes(node.freeSpace)} free` : formatRelativeTime(node.modifiedAt) }}
+
+    <td class="border-b border-l border-line px-2 py-1.5 text-[11px] whitespace-nowrap text-faint">
+      {{ node.modifiedAt === null ? '—' : formatRelativeTime(node.modifiedAt) }}
     </td>
 
-    <PathCellView
-      v-for="column in columns"
-      :key="column.instanceId"
-      :cell="cellFor(node, column.instanceId)"
-      :path="node.path"
-      :instance-name="column.name"
-      :staged="stagedForCell(column.instanceId, node.path)"
-      @create="emit('cellCreate', column.instanceId)"
-      @remove="
-        emit('cellRemove', {
-          instanceId: column.instanceId,
-          rootFolderId: cellFor(node, column.instanceId).rootFolderId,
-        })
-      "
-    />
+    <td
+      class="border-b border-l border-line px-2 py-1.5 font-mono text-[11px] whitespace-nowrap"
+      :class="node.lowSpace ? 'text-drift' : 'text-muted'"
+      :title="spaceTitle"
+    >
+      <span v-if="node.lowSpace" data-low-space="true">⚠ </span>
+      {{ node.freeSpace === null ? '—' : formatBytes(node.freeSpace) }}
+    </td>
+
+    <!-- state -->
+    <td class="border-b border-l border-line px-2 py-1.5">
+      <div class="flex flex-wrap gap-1">
+        <PathFlagBadge v-for="flag in badges" :key="flag" :flag="flag" />
+      </div>
+    </td>
 
     <td class="border-b border-l border-line px-2 py-1.5 text-right whitespace-nowrap">
       <span class="inline-flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">

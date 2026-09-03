@@ -119,7 +119,7 @@ describe('the path matrix', () => {
     assert.ok(node);
     assert.equal(node.flags.includes('untracked'), false);
     assert.equal(node.flags.includes('rootFolder'), true);
-    assert.equal(node.cells[0]?.mediaUnder, 3);
+    assert.equal(node.owners[0]?.mediaUnder, 3);
   });
 
   test('a root folder is a leaf: the library below it is not this view to manage', async () => {
@@ -146,8 +146,9 @@ describe('the path matrix', () => {
 
     const rootFolder = nodeAt(levelFor(body, media), 'library');
     assert.equal(rootFolder?.flags.includes('rootFolder'), true);
-    assert.equal(rootFolder?.cells[0]?.role, 'rootFolder');
-    assert.equal(rootFolder?.cells[0]?.rootFolderId, 1);
+    assert.equal(rootFolder?.owners[0]?.use, 'rootFolder');
+    assert.equal(rootFolder?.owners[0]?.rootFolderId, 1);
+    assert.equal(rootFolder?.owners[0]?.name, 'Radarr', 'the chip renders without a join');
   });
 
   test('a folder alongside a root folder that nobody roots is flagged', async () => {
@@ -156,7 +157,7 @@ describe('the path matrix', () => {
 
     assert.equal(node?.flags.includes('candidate'), true, 'the "not a root folder" signal');
     assert.equal(node?.flags.includes('rootFolder'), false);
-    assert.equal(node?.cells[0]?.role, 'outside');
+    assert.deepEqual(node?.owners, [], 'nobody uses it - which is the whole point');
     assert.ok((body.totals.candidates ?? 0) >= 1);
   });
 
@@ -174,7 +175,7 @@ describe('the path matrix', () => {
     const mount = levelFor(body, null)?.nodes.find((node) => node.path === media);
 
     // The mount holds 2 media items, but they sit under a root folder further down.
-    assert.ok((mount?.cells[0]?.mediaUnder ?? 0) > 0);
+    assert.ok((mount?.owners[0]?.mediaUnder ?? 0) > 0);
     assert.equal(mount?.flags.includes('unmanaged'), false);
     assert.equal(body.totals.unmanaged, 0);
   });
@@ -204,7 +205,7 @@ describe('the path matrix', () => {
     assert.equal(node?.inScope, true);
     assert.equal(node?.origin, 'arr');
     assert.equal(node?.flags.includes('missing'), true);
-    assert.equal(node?.cells[0]?.title, 'Gone Missing');
+    assert.equal(node?.owners[0]?.title, 'Gone Missing');
   });
 
   test('a wanted film nobody has downloaded is not a folder missing from disk', async () => {
@@ -277,6 +278,99 @@ describe('the path matrix', () => {
     assert.equal(body.columns[0]?.rootFolderCount, 2);
     assert.equal(body.columns[0]?.mediaPathCount, 3);
     assert.equal(body.totals.rootFolderPaths, 2);
+  });
+
+  // ------------------------------------------------------------------- severity
+
+  test('severity states the worst thing known about a folder, and nothing louder', async () => {
+    const level = levelFor(
+      await matrix(`?path=${encodeURIComponent(films())}&only=all`),
+      films(),
+    );
+
+    // An *Arr path the disk does not have is the one genuinely broken state.
+    assert.equal(nodeAt(level, 'Gone Missing (2001)')?.severity, 'error');
+    // Alongside a root folder without being one, and holding media: the two questions
+    // this view exists to answer.
+    assert.equal(nodeAt(levelFor(await matrix(), media), 'old-movies')?.severity, 'warn');
+    // Inside a root folder, tracked by nobody. True of every non-media folder in a
+    // library, so it must stay quiet or it drowns the two above.
+    assert.equal(nodeAt(level, 'Orphan Film (1999)')?.severity, 'info');
+    assert.equal(nodeAt(level, 'The Matrix (1999)')?.severity, 'ok');
+  });
+
+  test('a level reports the worst severity inside it, so a collapsed row can warn', async () => {
+    // films/ holds Gone Missing (2001), which is not on disk.
+    const inside = await matrix(`?path=${encodeURIComponent(films())}&only=all`);
+    assert.equal(levelFor(inside, films())?.rollup.severity, 'error');
+
+    // The mount holds old-movies, which is nobody's root folder.
+    assert.equal(levelFor(await matrix(), media)?.rollup.severity, 'warn');
+  });
+
+  // ----------------------------------------------------------------- disk space
+
+  test('every row reports its own filesystem free space, not just the mounts', async () => {
+    const body = await matrix();
+    const mount = levelFor(body, null)?.nodes.find((node) => node.path === media);
+    const sibling = nodeAt(levelFor(body, media), 'old-movies');
+
+    assert.ok(mount?.freeSpace !== null && mount?.freeSpace !== undefined);
+    assert.ok(sibling?.freeSpace !== null, 'a plain folder used to report nothing here');
+    assert.equal(sibling?.freeSpace, mount?.freeSpace, 'one filesystem, one answer');
+    assert.equal(sibling?.totalSpace, mount?.totalSpace);
+  });
+
+  test('the low-space warning lands on mounts and root folders only', async () => {
+    // A threshold nothing can satisfy, so the *placement* is what is under test.
+    const loud = makeTempDir();
+    const loudServer = await startTestApp(loud, {
+      fsRoots: [media],
+      lowSpaceBytes: Number.MAX_SAFE_INTEGER,
+    });
+    try {
+      await api<InstanceResponse>(loudServer.url, '/instances', {
+        method: 'POST',
+        body: { name: 'Radarr', kind: 'radarr', baseUrl: arr.url, apiKey: serverApiKey() },
+      });
+      const body = (await api<PathMatrixResponse>(loudServer.url, '/storage/matrix')).body;
+
+      assert.equal(
+        levelFor(body, null)?.nodes.find((node) => node.path === media)?.lowSpace,
+        true,
+        'a mount is where the filesystem is',
+      );
+      assert.equal(nodeAt(levelFor(body, media), 'library')?.lowSpace, true, 'so is a root folder');
+      // Every row under a root folder shares its filesystem; flagging them all would
+      // paint a whole library amber and say nothing actionable.
+      assert.equal(nodeAt(levelFor(body, media), 'old-movies')?.lowSpace, false);
+      assert.equal(nodeAt(levelFor(body, media), 'films-link')?.lowSpace, false);
+    } finally {
+      await loudServer.close();
+      removeTempDir(loud);
+    }
+  });
+
+  test('a low-space root folder reads as a warning, not merely as a number', async () => {
+    const quiet = nodeAt(levelFor(await matrix(), media), 'library');
+    assert.equal(quiet?.lowSpace, false);
+    assert.equal(quiet?.severity, 'ok', 'plenty of room, nothing to say');
+  });
+
+  // ------------------------------------------------------------ action shaping
+
+  test('canAddRootFolder is false where an instance already roots, true where it could', async () => {
+    const body = await matrix();
+    const level = levelFor(body, media);
+
+    assert.equal(nodeAt(level, 'library')?.canAddRootFolder, false, 'it is already the root folder');
+    assert.equal(nodeAt(level, 'old-movies')?.canAddRootFolder, true);
+    // Not on disk, so there is nothing to root at yet.
+    const missing = nodeAt(
+      levelFor(await matrix(`?path=${encodeURIComponent(films())}&only=missing`), films()),
+      'Gone Missing (2001)',
+    );
+    assert.equal(missing?.canAddRootFolder, false);
   });
 });
 
@@ -406,5 +500,213 @@ describe('the path matrix on a folder that still holds a whole library', () => {
     assert.equal(node?.flags.includes('unmanaged'), true);
     assert.equal(node?.flags.includes('rootFolder'), false);
     assert.equal(node?.expandable, true, 'unlike a root folder, this one opens');
+  });
+});
+
+// -------------------------------------------------------------------- a real fleet
+
+/**
+ * Two instances rooted in different subtrees - the layout the redesign is built on: a
+ * folder is used by one instance, not compared across all of them.
+ *
+ * This suite owns the two invariants the per-instance cells used to carry: an instance
+ * that did not answer is never rendered as a gap, and a folder nobody selected has an
+ * opinion about is not in their tree.
+ */
+describe('the path matrix across a fleet of instances', () => {
+  let radarr: FakeArrServer;
+  let sonarr: FakeArrServer;
+  let server: TestApp;
+  let configDir: string;
+  let media: string;
+  let radarrId = 0;
+  let sonarrId = 0;
+  let deadId = 0;
+
+  const movies = (): string => path.join(media, 'movies');
+  const tv = (): string => path.join(media, 'tv');
+
+  const matrix = async (query = ''): Promise<PathMatrixResponse> =>
+    (await api<PathMatrixResponse>(server.url, `/storage/matrix${query}`)).body;
+
+  const add = async (name: string, kind: 'radarr' | 'sonarr', baseUrl: string): Promise<number> =>
+    (
+      await api<InstanceResponse>(server.url, '/instances', {
+        method: 'POST',
+        body: { name, kind, baseUrl, apiKey: serverApiKey() },
+      })
+    ).body.instance.id;
+
+  before(async () => {
+    media = makeTempDir();
+    mkdirSync(path.join(movies(), 'The Matrix (1999)'), { recursive: true });
+    mkdirSync(path.join(tv(), 'One Piece'), { recursive: true });
+    // Nobody's root folder, and it holds nothing either.
+    mkdirSync(path.join(media, 'spare'), { recursive: true });
+
+    radarr = await startFakeArr({ kind: 'radarr' });
+    radarr.state.rootFolders = [
+      { id: 1, path: movies(), accessible: true, freeSpace: 1e9, totalSpace: 4e9, unmappedFolders: [] },
+    ];
+    radarr.state.media = [
+      fakeMedia(10, 'The Matrix', path.join(movies(), 'The Matrix (1999)'), movies()),
+    ];
+
+    sonarr = await startFakeArr({ kind: 'sonarr' });
+    sonarr.state.rootFolders = [
+      { id: 1, path: tv(), accessible: true, freeSpace: 1e9, totalSpace: 4e9, unmappedFolders: [] },
+    ];
+    sonarr.state.media = [fakeMedia(20, 'One Piece', path.join(tv(), 'One Piece'), tv())];
+
+    configDir = makeTempDir();
+    server = await startTestApp(configDir, { fsRoots: [media] });
+
+    radarrId = await add('Radarr', 'radarr', radarr.url);
+    sonarrId = await add('Sonarr', 'sonarr', sonarr.url);
+    // Nothing listening here: the instance exists and cannot answer.
+    deadId = await add('Offline', 'radarr', 'http://127.0.0.1:1/');
+  });
+
+  after(async () => {
+    await server.close();
+    await radarr.close();
+    await sonarr.close();
+    removeTempDir(configDir);
+    removeTempDir(media);
+  });
+
+  test('one folder, one owner: each instance owns its own subtree', async () => {
+    const level = levelFor(await matrix(), media);
+
+    const moviesNode = nodeAt(level, 'movies');
+    assert.equal(moviesNode?.owners.length, 1, 'not one entry per instance');
+    assert.equal(moviesNode?.owners[0]?.instanceId, radarrId);
+    assert.equal(moviesNode?.owners[0]?.use, 'rootFolder');
+    assert.equal(moviesNode?.owners[0]?.kind, 'radarr');
+
+    const tvNode = nodeAt(level, 'tv');
+    assert.equal(tvNode?.owners.length, 1);
+    assert.equal(tvNode?.owners[0]?.instanceId, sonarrId);
+    assert.equal(tvNode?.owners[0]?.name, 'Sonarr');
+
+    // An instance with no claim is simply absent, rather than an empty cell.
+    assert.deepEqual(nodeAt(level, 'spare')?.owners, []);
+  });
+
+  test('an instance that did not answer is never an owner, and never a gap', async () => {
+    const body = await matrix();
+    const level = levelFor(body, media);
+
+    const dead = body.columns.find((column) => column.instanceId === deadId);
+    assert.ok(dead, 'it still gets a column - that is how the view can say so');
+    assert.equal(dead.reachable, false);
+    assert.ok(dead.error !== null);
+
+    // The invariant the `?` cell used to carry: unknown is never rendered as missing.
+    for (const node of level?.nodes ?? []) {
+      assert.equal(
+        node.owners.some((owner) => owner.instanceId === deadId),
+        false,
+        `${node.name} must not claim an unreachable instance owns it`,
+      );
+    }
+
+    // And it must not manufacture a problem either.
+    assert.equal(nodeAt(level, 'movies')?.severity, 'ok');
+    assert.equal(body.totals.unseenRootFolders, 0);
+    assert.equal(body.totals.missing, 0);
+  });
+
+  test('two instances rooting at one folder both get a chip, precedence first', async () => {
+    // Rare, but legal: the design supports it without an N-wide grid.
+    sonarr.state.rootFolders = [
+      { id: 1, path: tv(), accessible: true, freeSpace: 1e9, totalSpace: 4e9, unmappedFolders: [] },
+      { id: 7, path: movies(), accessible: true, freeSpace: 1e9, totalSpace: 4e9, unmappedFolders: [] },
+    ];
+    try {
+      const shared = nodeAt(levelFor(await matrix('?refresh=true'), media), 'movies');
+
+      assert.equal(shared?.owners.length, 2);
+      assert.deepEqual(
+        [...(shared?.owners ?? [])].map((owner) => owner.use),
+        ['rootFolder', 'rootFolder'],
+      );
+      assert.deepEqual(
+        [...(shared?.owners ?? [])].map((owner) => owner.rootFolderId).sort((a, b) => (a ?? 0) - (b ?? 0)),
+        [1, 7],
+        'each chip carries its own instance root folder id',
+      );
+    } finally {
+      sonarr.state.rootFolders = [
+        { id: 1, path: tv(), accessible: true, freeSpace: 1e9, totalSpace: 4e9, unmappedFolders: [] },
+      ];
+      await matrix('?refresh=true');
+    }
+  });
+
+  test('an inaccessible root folder is a warning on its own row', async () => {
+    radarr.state.rootFolders = [
+      { id: 1, path: movies(), accessible: false, freeSpace: 0, totalSpace: 0, unmappedFolders: [] },
+    ];
+    try {
+      const node = nodeAt(levelFor(await matrix('?refresh=true'), media), 'movies');
+      assert.equal(node?.owners[0]?.accessible, false);
+      assert.equal(node?.severity, 'warn', 'the instance cannot see its own root folder');
+    } finally {
+      radarr.state.rootFolders = [
+        { id: 1, path: movies(), accessible: true, freeSpace: 1e9, totalSpace: 4e9, unmappedFolders: [] },
+      ];
+      await matrix('?refresh=true');
+    }
+  });
+
+  // -------------------------------------------------------------- instance filter
+
+  test('filtering by instance narrows the spine to that instance own tree', async () => {
+    const body = await matrix(`?instance=${String(radarrId)}`);
+    const names = levelFor(body, media)?.nodes.map((node) => node.name) ?? [];
+
+    assert.equal(names.includes('movies'), true, "Radarr's root folder");
+    assert.equal(names.includes('tv'), false, "Sonarr's root folder is not Radarr's business");
+    assert.equal(names.includes('spare'), false, 'nobody selected has an opinion about it');
+  });
+
+  test('the filter keeps the ancestors the tree needs to connect to its leaves', async () => {
+    // The root folder is a level down from the mount, so the mount itself has to survive
+    // a filter that selects only the instance rooted below it.
+    const body = await matrix(`?instance=${String(radarrId)}`);
+    const mount = levelFor(body, null)?.nodes.find((node) => node.path === media);
+
+    assert.ok(mount, 'the mount is still a row - otherwise movies/ has no parent');
+    assert.ok(levelFor(body, media), 'and it is still expanded');
+  });
+
+  test('the filter never hides an instance from the bar, or a mapping mismatch', async () => {
+    const body = await matrix(`?instance=${String(radarrId)}`);
+
+    // The filter bar has to keep listing everything, or it cannot be turned off again.
+    assert.equal(body.columns.length, 3);
+    assert.deepEqual(
+      body.columns.map((column) => column.instanceId).sort((a, b) => a - b),
+      [radarrId, sonarrId, deadId].sort((a, b) => a - b),
+    );
+    // And these stay exact rather than becoming per-selection facts.
+    assert.equal(body.totals.rootFolderPaths, 2);
+  });
+
+  test('a rollup still counts what is really in the directory, filter or not', async () => {
+    const all = levelFor(await matrix(), media)?.rollup;
+    const filtered = levelFor(await matrix(`?instance=${String(radarrId)}`), media)?.rollup;
+
+    // Rows are a subset; "how many entries are in here" is not.
+    assert.equal(all?.entries, filtered?.entries);
+    assert.equal(filtered?.entries, 3, 'movies, tv and spare');
+    assert.equal(levelFor(await matrix(`?instance=${String(radarrId)}`), media)?.matched, 1);
+  });
+
+  test('an unknown instance id yields an empty tree, not the whole fleet', async () => {
+    const body = await matrix('?instance=99999');
+    assert.deepEqual(levelFor(body, null)?.nodes.map((node) => node.name) ?? [], []);
+    assert.equal(body.columns.length, 3, 'the bar still lists the real ones');
   });
 });

@@ -258,13 +258,27 @@ export async function isMountPoint(target: string): Promise<boolean> {
   return here.deviceId !== parent.deviceId;
 }
 
-export async function freeSpaceAt(target: string): Promise<number | null> {
+export interface FilesystemSpace {
+  readonly freeSpace: number | null;
+  readonly totalSpace: number | null;
+}
+
+/** Free and total space of the filesystem holding `target`. One statfs, both numbers. */
+export async function statfsAt(target: string): Promise<FilesystemSpace> {
   try {
     const stats = await statfs(target);
-    return Number(stats.bsize) * Number(stats.bavail);
+    const blockSize = Number(stats.bsize);
+    return {
+      freeSpace: blockSize * Number(stats.bavail),
+      totalSpace: blockSize * Number(stats.blocks),
+    };
   } catch {
-    return null;
+    return { freeSpace: null, totalSpace: null };
   }
+}
+
+export async function freeSpaceAt(target: string): Promise<number | null> {
+  return (await statfsAt(target)).freeSpace;
 }
 
 export const ACCESS_READ = 4;

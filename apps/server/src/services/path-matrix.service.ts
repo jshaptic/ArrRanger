@@ -1,10 +1,11 @@
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
+import { PATH_SEVERITIES, PATH_USES } from '@arrranger/shared';
 import type {
   ArrRootFolder,
+  FsRoot,
   MappingMismatch,
   PathFlag,
-  PathInstanceCell,
   PathMatrixColumn,
   PathMatrixLevel,
   PathMatrixResponse,
@@ -12,12 +13,22 @@ import type {
   PathNode,
   PathNodeKind,
   PathNodeOrigin,
-  PathRole,
+  PathOwner,
   PathRollup,
   PathSelector,
+  PathSeverity,
+  PathUse,
 } from '@arrranger/shared';
+import { isLowSpace, type LowSpaceThresholds } from '../config.js';
 import type { FilesystemService } from '../fs/filesystem.service.js';
-import { ACCESS_READ, ACCESS_WRITE, canAccess, describePath } from '../fs/paths.js';
+import {
+  ACCESS_READ,
+  ACCESS_WRITE,
+  canAccess,
+  describePath,
+  statfsAt,
+  type FilesystemSpace,
+} from '../fs/paths.js';
 import {
   isAtOrUnder,
   normalisePath,
@@ -29,6 +40,7 @@ import {
 export interface PathMatrixServiceDeps {
   readonly index: PathIndexService;
   readonly filesystem: FilesystemService;
+  readonly lowSpace: LowSpaceThresholds;
 }
 
 export interface PathMatrixQuery {
@@ -38,8 +50,35 @@ export interface PathMatrixQuery {
   readonly filter?: string;
   readonly limit?: number;
   readonly offset?: number;
-  readonly sort?: 'name' | 'interesting' | 'modified';
+  readonly sort?: PathSort;
+  /**
+   * Show only these instances' folders. Empty or absent means the whole fleet.
+   *
+   * Scoping happens here rather than in the browser because everything the client would
+   * need to filter on is server-derived: the spine itself is built from the selected
+   * instances' root folders, and `matched`, `truncated` and every rollup count come from
+   * the full candidate set. A client-side filter would leave the summary row describing
+   * rows it had just removed.
+   */
+  readonly instanceIds?: readonly number[];
   readonly refresh?: boolean;
+}
+
+export const PATH_SORTS = ['name', 'interesting'] as const;
+export type PathSort = (typeof PATH_SORTS)[number];
+
+/**
+ * Per-request state that travels with the scoped index set.
+ *
+ * `space` is a memo, so the numbers are consistent across every level in one response and
+ * a fleet on one volume pays for one statfs, not one per row.
+ */
+interface LevelContext {
+  /** The instances in scope - already narrowed by `instanceIds`. */
+  readonly indexes: readonly InstancePathIndex[];
+  readonly space: SpaceResolver;
+  /** True when an instance filter is on, so folders nobody selected has an opinion on drop out. */
+  readonly scoped: boolean;
 }
 
 export const DEFAULT_LIMIT = 200;
@@ -64,6 +103,8 @@ interface Candidate {
   /** Only known once a node has been probed; null before that. */
   readonly childCountHint: number | null;
   readonly isRootFolder: boolean;
+  /** At least one reachable instance in scope has no root folder here. */
+  readonly canAddRootFolder: boolean;
   readonly insideRootFolder: boolean;
   readonly containsRootFolder: boolean;
 }
@@ -96,16 +137,26 @@ export class PathMatrixService {
       };
     }
 
-    const requested = (query.paths ?? []).map((entry) => normalisePath(entry));
-    const targets = requested.length > 0 ? requested : this.spine(indexes);
+    // `columns` and `mismatches` always describe the whole fleet: the filter bar has to
+    // keep listing every instance, and a volume mapping difference is not a per-selection
+    // fact. Everything that shapes the tree uses the scoped set.
+    const wanted = query.instanceIds ?? [];
+    const ctx: LevelContext = {
+      indexes: wanted.length > 0
+        ? indexes.filter((index) => wanted.includes(index.instanceId))
+        : indexes,
+      space: new SpaceResolver(rootsResponse.roots),
+      scoped: wanted.length > 0,
+    };
 
-    const levels = await Promise.all(
-      targets.map((target) => this.level(target, indexes, query)),
-    );
+    const requested = (query.paths ?? []).map((entry) => normalisePath(entry));
+    const targets = requested.length > 0 ? requested : this.spine(ctx.indexes);
+
+    const levels = await Promise.all(targets.map((target) => this.level(target, ctx, query)));
 
     // The synthetic top level carries the mounts and the paths this container cannot
     // see, so an unmapped root folder is a row rather than a footnote.
-    const topLevel = requested.length > 0 ? null : await this.topLevel(indexes, query);
+    const topLevel = requested.length > 0 ? null : await this.topLevel(ctx, query);
 
     return {
       enabled: true,
@@ -122,45 +173,42 @@ export class PathMatrixService {
 
   private async level(
     target: string,
-    indexes: readonly InstancePathIndex[],
+    ctx: LevelContext,
     query: PathMatrixQuery,
   ): Promise<PathMatrixLevel> {
     const resolved = await this.deps.filesystem.guard.resolve(target);
     let candidates: Candidate[];
     let error: string | null = null;
 
-    if (isRootFolderPath(resolved, indexes)) {
+    if (isRootFolderPath(resolved, ctx.indexes)) {
       // Expansion stops at a root folder. Below it is the library - hundreds of media
       // folders this view does not manage - and reading them is the expensive part.
       candidates = [];
     } else {
       try {
-        candidates = await this.candidatesOf(resolved, indexes);
+        candidates = await this.candidatesOf(resolved, ctx);
       } catch (caught) {
         candidates = [];
         error = caught instanceof Error ? caught.message : 'Could not read this directory';
       }
     }
 
-    return this.assemble(resolved, candidates, indexes, query, { error });
+    return this.assemble(resolved, candidates, ctx, query, { error });
   }
 
   /** The mounts, plus every *Arr root folder this container cannot see. */
-  private async topLevel(
-    indexes: readonly InstancePathIndex[],
-    query: PathMatrixQuery,
-  ): Promise<PathMatrixLevel> {
+  private async topLevel(ctx: LevelContext, query: PathMatrixQuery): Promise<PathMatrixLevel> {
     const mounts = this.deps.filesystem.roots().roots.map((root) => root.path);
-    const unseen = this.unseenRootFolders(indexes);
+    const unseen = this.unseenRootFolders(ctx.indexes);
 
     const candidates: Candidate[] = [
-      ...mounts.map((mount) => this.classify(mount, indexes, {
+      ...mounts.map((mount) => this.classify(mount, ctx, {
         origin: 'disk',
         kind: 'directory',
         exists: true,
         inScope: true,
       })),
-      ...unseen.map((folder) => this.classify(folder, indexes, {
+      ...unseen.map((folder) => this.classify(folder, ctx, {
         origin: 'arr',
         kind: 'directory',
         exists: false,
@@ -168,20 +216,20 @@ export class PathMatrixService {
       })),
     ];
 
-    return this.assemble(null, candidates, indexes, query, { error: null });
+    return this.assemble(null, candidates, ctx, query, { error: null });
   }
 
   private async assemble(
     levelPath: string | null,
     candidates: readonly Candidate[],
-    indexes: readonly InstancePathIndex[],
+    ctx: LevelContext,
     query: PathMatrixQuery,
     context: { error: string | null },
   ): Promise<PathMatrixLevel> {
     // "Sits alongside a root folder" is a fact about the level, not the child, so it is
     // established once here and threaded through selection, flags and the rollup alike.
     const scope = { levelHasRootFolder: candidates.some((entry) => entry.isRootFolder) };
-    const rollup = rollupOf(candidates, indexes, levelPath, scope);
+    const rollup = rollupOf(candidates, ctx.indexes, levelPath, scope);
 
     // Small levels behave exactly like the old explorer: everything, fully probed.
     const small = candidates.length <= FULL_LEVEL_ENTRIES;
@@ -192,6 +240,7 @@ export class PathMatrixService {
     // do not reorder: selecting before probing is the whole performance story.
     const matched = candidates.filter((candidate) => {
       if (filter.length > 0 && !candidate.name.toLowerCase().includes(filter)) return false;
+      if (ctx.scoped && !inScopedTree(candidate)) return false;
       return selectors.some((selector) => matchesSelector(candidate, selector, scope));
     });
 
@@ -201,7 +250,7 @@ export class PathMatrixService {
     const page = sorted.slice(offset, offset + limit);
 
     const nodes = await Promise.all(
-      page.map((candidate) => this.enrich(candidate, indexes, { probe: wantsProbe, ...scope })),
+      page.map((candidate) => this.enrich(candidate, ctx, { probe: wantsProbe, ...scope })),
     );
 
     return {
@@ -222,10 +271,7 @@ export class PathMatrixService {
   // -------------------------------------------------------------- candidates
 
   /** One readdir, plus the *Arr children the index already knows about. */
-  private async candidatesOf(
-    target: string,
-    indexes: readonly InstancePathIndex[],
-  ): Promise<Candidate[]> {
+  private async candidatesOf(target: string, ctx: LevelContext): Promise<Candidate[]> {
     const dirents = await readdir(target, { withFileTypes: true });
     const seen = new Set<string>();
     const candidates: Candidate[] = [];
@@ -234,7 +280,7 @@ export class PathMatrixService {
       const child = path.join(target, dirent.name);
       seen.add(child);
       candidates.push(
-        this.classify(child, indexes, {
+        this.classify(child, ctx, {
           origin: 'disk',
           kind: kindOf(dirent),
           exists: true,
@@ -248,14 +294,14 @@ export class PathMatrixService {
     // Only paths an instance holds *files* for count. A monitored film nobody has
     // downloaded yet has a path that is meant not to exist; surfacing those would bury
     // the real signal under every unreleased title in the library.
-    for (const index of indexes) {
+    for (const index of ctx.indexes) {
       if (!index.reachable) continue;
       for (const child of index.childrenByParent.get(normalisePath(target)) ?? []) {
         if (seen.has(child)) continue;
         if (index.mediaAt.has(child) && !index.mediaWithFiles.has(child)) continue;
         seen.add(child);
         candidates.push(
-          this.classify(child, indexes, {
+          this.classify(child, ctx, {
             origin: 'arr',
             kind: 'directory',
             exists: false,
@@ -271,11 +317,11 @@ export class PathMatrixService {
   /** Everything derivable from the index alone - no syscall. */
   private classify(
     target: string,
-    indexes: readonly InstancePathIndex[],
+    ctx: LevelContext,
     facts: { origin: PathNodeOrigin; kind: PathNodeKind; exists: boolean; inScope: boolean },
   ): Candidate {
     const normalised = normalisePath(target);
-    const reachable = indexes.filter((index) => index.reachable);
+    const reachable = ctx.indexes.filter((index) => index.reachable);
 
     const rootFolderOn = reachable.filter((index) => index.rootFolders.has(normalised));
     const mediaUnder = reachable.reduce(
@@ -297,6 +343,14 @@ export class PathMatrixService {
       mediaUnder,
       childCountHint: null,
       isRootFolder: rootFolderOn.length > 0,
+      // A directory an instance could root at but does not. True for a media folder deep
+      // inside a root folder too - the same latitude the old per-cell "click a gap to add
+      // one here" had, so this is not a new footgun.
+      canAddRootFolder:
+        facts.exists &&
+        facts.inScope &&
+        facts.kind === 'directory' &&
+        reachable.some((index) => !index.rootFolders.has(normalised)),
       insideRootFolder: reachable.some((index) =>
         index.rootFolderPrefixes.some(
           (prefix) => prefix !== normalised && isAtOrUnder(normalised, prefix),
@@ -315,10 +369,10 @@ export class PathMatrixService {
   /** The only place a per-child syscall happens, and only for rows being returned. */
   private async enrich(
     candidate: Candidate,
-    indexes: readonly InstancePathIndex[],
+    ctx: LevelContext,
     options: { probe: boolean; levelHasRootFolder: boolean },
   ): Promise<PathNode> {
-    const base = this.baseNode(candidate, indexes, options);
+    const base = this.baseNode(candidate, ctx, options);
     if (!candidate.exists || !candidate.inScope || !options.probe) return base;
 
     // Counting a root folder's children means reading a directory with hundreds of media
@@ -334,6 +388,12 @@ export class PathMatrixService {
     ]);
 
     const measurement = this.deps.filesystem.cachedMeasurement(candidate.path);
+    // Probed, so there is a device id to key the memo on: one statfs per filesystem per
+    // request, and none at all when every row sits on the mount that seeded it.
+    const space = await ctx.space.forDevice(stats.deviceId, candidate.path);
+
+    const flags = this.flagsFor(candidate, { childCount, readable, writable }, options);
+    const lowSpace = this.lowSpaceFor(candidate, space);
 
     return {
       ...base,
@@ -343,18 +403,28 @@ export class PathMatrixService {
       readable,
       writable,
       deviceId: stats.deviceId,
+      freeSpace: space.freeSpace,
+      totalSpace: space.totalSpace,
+      lowSpace,
       sizeOnDisk: measurement?.sizeOnDisk ?? (candidate.kind === 'file' ? stats.size : null),
-      flags: this.flagsFor(candidate, { childCount, readable, writable }, options),
+      flags,
+      severity: severityOf(flags, base.owners, lowSpace),
       expandable: expandableOf(candidate, childCount),
     };
   }
 
   private baseNode(
     candidate: Candidate,
-    indexes: readonly InstancePathIndex[],
+    ctx: LevelContext,
     scope: { levelHasRootFolder: boolean },
   ): PathNode {
-    const isMount = this.deps.filesystem.guard.isRoot(candidate.path);
+    // Not probed, so there is no device id yet: inherit the containing mount's numbers.
+    // A nested bind-mount below a mount therefore reports the outer filesystem until the
+    // row is probed - honest for the spine, which is always probed.
+    const space = this.mountSpaceFor(candidate.path);
+    const owners = this.ownersFor(candidate, ctx.indexes);
+    const flags = this.flagsFor(candidate, { childCount: null, readable: true, writable: true }, scope);
+    const lowSpace = this.lowSpaceFor(candidate, space);
 
     return {
       path: candidate.path,
@@ -368,58 +438,81 @@ export class PathMatrixService {
       readable: candidate.exists,
       writable: false,
       deviceId: null,
-      freeSpace: isMount ? this.mountFacts(candidate.path)?.freeSpace ?? null : null,
-      totalSpace: isMount ? this.mountFacts(candidate.path)?.totalSpace ?? null : null,
+      freeSpace: space.freeSpace,
+      totalSpace: space.totalSpace,
+      lowSpace,
       sizeOnDisk: this.deps.filesystem.cachedMeasurement(candidate.path)?.sizeOnDisk ?? null,
       error: null,
-      cells: this.cellsFor(candidate, indexes),
-      flags: this.flagsFor(candidate, { childCount: null, readable: true, writable: true }, scope),
+      owners,
+      flags,
+      severity: severityOf(flags, owners, lowSpace),
+      canAddRootFolder: candidate.canAddRootFolder,
       rollup: null,
       expandable: expandableOf(candidate, candidate.childCountHint),
     };
   }
 
-  private mountFacts(target: string): { freeSpace: number | null; totalSpace: number | null } | null {
-    return this.deps.filesystem.roots().roots.find((root) => root.path === target) ?? null;
+  /** The mount this path sits under, for a row that was never stat'd. */
+  private mountSpaceFor(target: string): FilesystemSpace {
+    const root = this.deps.filesystem.guard.rootFor(target);
+    if (root === null) return { freeSpace: null, totalSpace: null };
+    const mount = this.deps.filesystem
+      .roots()
+      .roots.find((entry) => entry.path === root.configured);
+    return { freeSpace: mount?.freeSpace ?? null, totalSpace: mount?.totalSpace ?? null };
   }
 
-  // --------------------------------------------------------------------- cells
+  /**
+   * Only a mount or a root folder carries the warning.
+   *
+   * Every row under a root folder shares its filesystem, so flagging them all would paint
+   * a whole library amber and tell you nothing you could act on.
+   */
+  private lowSpaceFor(candidate: Candidate, space: FilesystemSpace): boolean {
+    const decisive = candidate.isRootFolder || this.deps.filesystem.guard.isRoot(candidate.path);
+    if (!decisive) return false;
+    return isLowSpace(space.freeSpace, space.totalSpace, this.deps.lowSpace);
+  }
 
-  private cellsFor(
+  // -------------------------------------------------------------------- owners
+
+  /**
+   * The instances that use this exact path. Usually exactly one.
+   *
+   * An unreachable instance is skipped entirely rather than contributing an `unknown`
+   * entry: it is never an owner, and the response says so once, in `columns`.
+   */
+  private ownersFor(
     candidate: Candidate,
     indexes: readonly InstancePathIndex[],
-  ): readonly PathInstanceCell[] {
-    return indexes.map((index): PathInstanceCell => {
-      if (!index.reachable) {
-        return {
-          instanceId: index.instanceId,
-          known: false,
-          role: 'unknown',
-          rootFolderId: null,
-          accessible: null,
-          freeSpace: null,
-          totalSpace: null,
-          mediaUnder: 0,
-          title: null,
-        };
-      }
+  ): readonly PathOwner[] {
+    const owners: PathOwner[] = [];
+
+    for (const index of indexes) {
+      if (!index.reachable) continue;
 
       const folder: ArrRootFolder | undefined = index.rootFolders.get(candidate.path);
-      const mediaUnder = index.mediaUnder.get(candidate.path) ?? 0;
       const title = index.mediaAt.get(candidate.path) ?? null;
+      const mediaUnder = index.mediaUnder.get(candidate.path) ?? 0;
 
-      return {
+      const use: PathUse | null =
+        folder !== undefined ? 'rootFolder' : title !== null ? 'tracked' : mediaUnder > 0 ? 'ancestor' : null;
+      if (use === null) continue;
+
+      owners.push({
         instanceId: index.instanceId,
-        known: true,
-        role: roleFor(index, candidate.path, folder !== undefined, title !== null, mediaUnder),
+        name: index.name,
+        kind: index.kind,
+        use,
         rootFolderId: folder?.id ?? null,
         accessible: folder?.accessible ?? null,
-        freeSpace: folder?.freeSpace ?? null,
-        totalSpace: folder?.totalSpace ?? null,
         mediaUnder,
         title,
-      };
-    });
+      });
+    }
+
+    // The decisive claim leads, so a row's first chip is the one its actions apply to.
+    return owners.sort((a, b) => PATH_USES.indexOf(b.use) - PATH_USES.indexOf(a.use));
   }
 
   // --------------------------------------------------------------------- flags
@@ -576,7 +669,85 @@ export class PathMatrixService {
   }
 }
 
+/**
+ * Free/total space per filesystem, memoised for one request.
+ *
+ * Promises, not values: `enrich` runs the whole page under `Promise.all`, so two rows on
+ * one filesystem must share a single in-flight statfs rather than race to issue two.
+ */
+class SpaceResolver {
+  private readonly byDevice = new Map<string, Promise<FilesystemSpace>>();
+
+  constructor(roots: readonly FsRoot[]) {
+    // The mounts are already probed, so the normal single-`/data`-volume layout answers
+    // every row for free.
+    for (const root of roots) {
+      if (root.deviceId === null) continue;
+      this.byDevice.set(root.deviceId, Promise.resolve({
+        freeSpace: root.freeSpace,
+        totalSpace: root.totalSpace,
+      }));
+    }
+  }
+
+  forDevice(deviceId: string | null, target: string): Promise<FilesystemSpace> {
+    if (deviceId === null) return statfsAt(target);
+    const known = this.byDevice.get(deviceId);
+    if (known !== undefined) return known;
+
+    const pending = statfsAt(target);
+    this.byDevice.set(deviceId, pending);
+    return pending;
+  }
+}
+
 // ----------------------------------------------------------------- pure helpers
+
+/**
+ * The worst thing known about a path.
+ *
+ * `untracked` is deliberately only `info`: it fires on every non-media folder inside a
+ * root folder, so promoting it would paint a healthy library amber and destroy the signal
+ * the two `warn` flags carry. `candidate` and `unmanaged` are the questions this view
+ * exists to answer, so they are what `warn` means here.
+ */
+export function severityOf(
+  flags: readonly PathFlag[],
+  owners: readonly PathOwner[],
+  lowSpace: boolean,
+): PathSeverity {
+  const has = (flag: PathFlag): boolean => flags.includes(flag);
+
+  if (has('unseen') || has('missing') || has('unreadable')) return 'error';
+  if (has('candidate') || has('unmanaged') || has('readOnly') || lowSpace) return 'warn';
+  if (owners.some((owner) => owner.use === 'rootFolder' && owner.accessible === false)) return 'warn';
+  if (has('untracked') || has('empty') || has('symlink')) return 'info';
+  return 'ok';
+}
+
+/** The worst severity in a set - `PATH_SEVERITIES` is ordered, so this is a max. */
+export function worstSeverity(severities: readonly PathSeverity[]): PathSeverity {
+  return severities.reduce<PathSeverity>(
+    (worst, entry) => (PATH_SEVERITIES.indexOf(entry) > PATH_SEVERITIES.indexOf(worst) ? entry : worst),
+    'ok',
+  );
+}
+
+/**
+ * With an instance filter on, a folder none of the selected instances has an opinion about
+ * is not in their tree at all.
+ *
+ * `containsRootFolder` is what keeps `/data` and `/data/media` visible when the selection
+ * roots four levels down - without it the tree could not connect to its own leaves.
+ */
+function inScopedTree(candidate: Candidate): boolean {
+  return (
+    candidate.isRootFolder ||
+    candidate.insideRootFolder ||
+    candidate.containsRootFolder ||
+    candidate.mediaUnder > 0
+  );
+}
 
 /**
  * A root folder is a leaf. Its children are media folders, which this view neither
@@ -606,23 +777,6 @@ async function countChildren(target: string): Promise<number | null> {
   } catch {
     return null;
   }
-}
-
-/** Role precedence: rootFolder > tracked > ancestor > inside > outside. */
-function roleFor(
-  index: InstancePathIndex,
-  target: string,
-  isRootFolder: boolean,
-  isTracked: boolean,
-  mediaUnder: number,
-): PathRole {
-  if (isRootFolder) return 'rootFolder';
-  if (isTracked) return 'tracked';
-  if (mediaUnder > 0) return 'ancestor';
-  if (index.rootFolderPrefixes.some((prefix) => prefix !== target && isAtOrUnder(target, prefix))) {
-    return 'inside';
-  }
-  return 'outside';
 }
 
 /** A directory sitting alongside root folders that is not one - the headline signal. */
@@ -676,7 +830,46 @@ function rollupOf(
     empty: null,
     unreadable: null,
     mediaUnder,
+    severity: levelSeverityOf(candidates, scope),
   };
+}
+
+/**
+ * The worst severity among a level's entries, from the dirent list and the index alone.
+ *
+ * Deliberately built from the same predicates the flags are, but without the ones that
+ * need a syscall per child - `empty`, `unreadable`, `readOnly` and `lowSpace`. Probing 814
+ * children to colour one collapsed row is the cost this whole design exists to avoid, and
+ * a level already says whether it probed, via `childCountsResolved`.
+ */
+function levelSeverityOf(
+  candidates: readonly Candidate[],
+  scope: { levelHasRootFolder: boolean },
+): PathSeverity {
+  let severity: PathSeverity = 'ok';
+
+  for (const candidate of candidates) {
+    if (!candidate.exists) return 'error';
+    if (!candidate.inScope) return 'error';
+
+    const unmanaged =
+      candidate.mediaUnder > 0 &&
+      !candidate.isRootFolder &&
+      !candidate.insideRootFolder &&
+      !candidate.containsRootFolder;
+
+    if (isCandidate(candidate, scope.levelHasRootFolder) || unmanaged) {
+      severity = 'warn';
+      continue;
+    }
+    if (severity === 'ok') {
+      const untracked =
+        candidate.mediaUnder === 0 && candidate.insideRootFolder && !candidate.isRootFolder;
+      if (untracked || candidate.kind === 'symlink') severity = 'info';
+    }
+  }
+
+  return severity;
 }
 
 function matchesSelector(
@@ -714,11 +907,16 @@ function matchesSelector(
   }
 }
 
-/** Directories first, then the requested order - the explorer's habit, kept. */
-function sortCandidates(
-  candidates: readonly Candidate[],
-  sort: 'name' | 'interesting' | 'modified',
-): Candidate[] {
+/**
+ * Directories first, then the requested order - the explorer's habit, kept.
+ *
+ * There is deliberately no `modified` order. A candidate comes from a dirent, which
+ * carries no mtime, so ordering a level by it would mean statting every entry *before*
+ * paging - one stat per child on an 814-entry library, which is precisely the cost
+ * `only`/`q`/`limit`-before-probe exists to avoid. The Modified column still reports the
+ * fact for the rows that were probed; it just cannot be sorted on.
+ */
+function sortCandidates(candidates: readonly Candidate[], sort: PathSort): Candidate[] {
   const weight = (candidate: Candidate): number => {
     if (sort !== 'interesting') return 0;
     if (!candidate.exists) return 0;
