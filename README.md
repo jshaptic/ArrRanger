@@ -94,28 +94,6 @@ axis; see [The folder view](#the-folder-view).
 The rule is also why storage is not a separate view: changing a folder on disk and changing
 which instances root at it are one job, so they are one table.
 
-### Visual language
-
-In the matrices - tags and import lists - the same five cell states are used, and nothing
-else carries meaning:
-
-| Cue | Meaning |
-|---|---|
-| solid green cell + count | present, with how many media items carry it |
-| dashed empty cell | missing on that instance (click to stage it there) |
-| amber | drift: partial parity, an inaccessible mount, or a setting that disagrees |
-| violet ring + glyph | a staged operation is pending for this cell |
-| red `?` | that instance did not answer - unknown, deliberately *not* "missing" |
-
-An unreachable instance is never rendered as a configuration gap, and batch actions skip
-it. That distinction is enforced in `buildTagRows`/`buildRootFolderRows` (`cell.known`) and
-covered by tests.
-
-The folder view has no cells to colour, so it carries the same invariant differently: an
-instance that did not answer is absent from every row's owners, and the view says so once,
-above the table, rather than in a `?` per row. Amber and red survive as a per-row
-**severity** glyph.
-
 ### Tag parity matrix
 
 Unique tags down the Y axis, instances across the X axis. Each cell shows the attached
@@ -251,53 +229,6 @@ behaviour staged a destructive change from an unlabelled click with nothing on s
 saying so; the card names the instance, the folder and what it holds first. The card is
 teleported and positioned against the viewport rather than the row, because the table is a
 horizontal scroll container and would otherwise clip it.
-
-#### Monitoring
-
-Row badges are computed server-side so the vocabulary cannot drift:
-**`not a root folder`**, `untracked`, `unmanaged`, `missing`, `not mounted here`, `empty`,
-`symlink`, `no access`, `read-only`. The first of those is the question the view exists to
-answer - a folder sitting alongside your root folders that no instance roots at.
-
-**They sit beside the name, at the right of the Path column, and so does the glyph.** There
-is no State column: a folder's state is about that folder, and putting it a full table away
-from the name meant reading a row twice. The order within the cell is one sentence - the
-states, anything staged against them, then the glyph that summarises the lot:
-
-```
-▸ old-movies                    not a root folder · unmanaged  ✎ staged  ⚠
-```
-
-Those collapse into one **severity** per row, so a glance is enough and a problem two levels
-down is not invisible:
-
-| Severity | Source | Rendered |
-|---|---|---|
-| `error` | `not mounted here`, `missing`, `no access` | red `✕` |
-| `warn` | `not a root folder`, `unmanaged`, `read-only`, low free space, a root folder its own instance calls inaccessible | amber `⚠` |
-| `info` | `untracked`, `empty`, `symlink` | nothing |
-| `ok` | none of the above | nothing |
-
-`untracked` is only `info` on purpose. It fires on every non-media folder inside a root
-folder, so promoting it would paint a healthy library amber and bury the two `warn` states
-that are actually questions. A collapsed row also shows a dimmed `⚠` when the level below it
-holds something worse than itself.
-
-There is deliberately **no parity or drift reporting here**. This view is for reorganising
-and monitoring folders in their own right; comparing a setting across instances and
-aligning it is what the tag and import-list matrices are for. A fleet where each instance
-roots at its own subfolder is a normal layout, and calling all 79 of its root folders
-"drifted" was noise, not information.
-
-Root folders outside `FS_ROOTS`, or absent from disk, are **rows**, not a footnote: the
-first are marked `not mounted here` (with the mapping explanation still shown above the
-table), the second are struck through in their real tree position, at any depth.
-
-`missing` means *an instance holds a file for this path and the disk does not have it*.
-A monitored film nobody has downloaded yet also has a path that does not exist - Radarr
-assigns one up front - and that is not a problem, so those are not rows. Without that
-distinction a healthy 384-film library reported 998 "missing" folders; with it, it
-reports none.
 
 #### Free space is monitored per filesystem, not per instance
 
@@ -633,56 +564,3 @@ parked as `paused` and the in-flight item is marked `failed` with code `interrup
   split in [packages/shared/src/instance.ts](packages/shared/src/instance.ts).
 - ArrRanger has no authentication of its own. Put it behind your existing reverse proxy /
   SSO if it is reachable from outside your LAN.
-
-## *Arr API notes
-
-Two rules the code follows everywhere, both learned from how Radarr/Sonarr v3 actually
-behave:
-
-1. **Parse narrow, keep raw.** Responses are wide and differ per app and per version, so
-   Zod schemas validate only the fields that are rendered, and the untouched response body
-   is carried alongside as `raw` (`ArrResource<TView>`).
-2. **`PUT` replaces the resource.** A partial body silently wipes omitted fields, so every
-   edit is *fetch raw → merge the changed keys → PUT the merged object back*
-   (`mergeForPut`).
-
-Two v3 limitations shaped the design:
-
-- **There is no `PUT /api/v3/rootfolder`.** Root folders can only be created and deleted,
-  so "changing" one is really *create the new folder → move the media with the editor →
-  delete the old folder* - three staged steps, which is exactly what the queue models.
-- **`/movie` and `/series` do not paginate.** Both return the entire library, so the list
-  is fetched once into `resource_snapshots` and paged, searched and filtered in the
-  server. Radarr gets `excludeLocalCovers=true` and Sonarr `includeSeasonImages=false` to
-  keep the payload down.
-
-Errors are mapped to codes the UI can act on rather than raw statuses: `arr_unauthorized`,
-`arr_not_found` (usually a wrong URL base), `arr_validation_failed` (the 400 body's
-`propertyName: errorMessage` pairs, joined), `arr_timeout`, `arr_unreachable`,
-`arr_dns_failure`, `arr_tls_untrusted` (self-signed certificate - turn off Verify SSL),
-`arr_unexpected_response` (a proxy login page instead of JSON) and `arr_conflict`.
-
-## Toolchain decisions
-
-- **TypeScript is pinned to `~5.9`.** TypeScript 7 builds the server and shared packages
-  fine, but `vue-tsc` 3.x still resolves `typescript/lib/tsc`, which the native compiler
-  does not expose. Unpin once vue-tsc supports it.
-- **All build tooling lives in the root `package.json`.** npm's `--omit=dev` skips the
-  root's devDependencies but *not* a workspace's, so anything left in a workspace's
-  devDependencies would ship in the runtime image. Vue, Vite and friends are
-  devDependencies of `@arrranger/web` for the same reason - Vite inlines them into
-  `apps/web/dist` at build time.
-- **Migrations bracket `PRAGMA foreign_keys`.** SQLite cannot relax `NOT NULL` or edit a
-  `CHECK`, so making `queue_items.instance_id` nullable meant the standard table rebuild.
-  With foreign keys enforced, dropping the old table cascades through
-  `queue_events.item_id ON DELETE CASCADE` and silently takes the whole audit trail with it -
-  and the pragma is a no-op inside a transaction, where migrations run. The runner therefore
-  toggles it outside the transaction and runs `foreign_key_check` afterwards. Covered by a
-  test that seeds a v1 database with items *and* events.
-- **Frontend tests use Vitest + happy-dom.** No browser was involved: the views are
-  mounted headlessly with the API layer mocked, which verifies rendering, interaction and
-  store wiring. Visual styling itself is not asserted.
-- **`better-sqlite3` install script.** npm 11.16+ gates install scripts behind
-  `allowScripts` in package.json. The package ships musl prebuilds, but the npm inside
-  the base image still runs the implicit `node-gyp rebuild`, so the builder stage
-  installs `python3 make g++`. None of it reaches the runtime image.
