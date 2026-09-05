@@ -4,6 +4,7 @@ import type {
   FsPreflight,
   FsRoot,
   MappingMismatch,
+  PathFilterMode,
   PathMatrixColumn,
   PathMatrixLevel,
   PathMatrixResponse,
@@ -11,6 +12,7 @@ import type {
   PathNode,
   QueuePayloadFor,
 } from '@arrranger/shared';
+import { parsePathFilter } from '@arrranger/shared';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { ApiRequestError } from '@/api/client';
@@ -66,8 +68,20 @@ export const usePathsStore = defineStore('paths', () => {
   const focus = ref<string | null>(null);
   const flatView = ref(false);
   const filter = ref('');
+  /** `exclude` turns the filter into "everything but this". */
+  const filterMode = ref<PathFilterMode>('include');
   /** Which instances' folders to show. Empty means the whole fleet. */
   const instanceFilter = ref<number[]>([]);
+
+  /**
+   * The filter, expanded.
+   *
+   * The server expands the very same source string for the very same reason, and the two
+   * must agree - which is why the expander lives in `@arrranger/shared` rather than in
+   * either of them. Here it drives the flat list's own pruning, the "on the way to a
+   * match" dimming and everything the filter bar reports back to the user.
+   */
+  const parsedFilter = computed(() => parsePathFilter(filter.value, filterMode.value));
 
   const measurements = ref<Record<string, FsMeasurement>>({});
   const measuring = ref<Record<string, boolean>>({});
@@ -85,12 +99,36 @@ export const usePathsStore = defineStore('paths', () => {
 
   const rows = computed<PathRow[]>(() =>
     flatView.value
-      ? flattenLeaves({ levels: flatLevels.value, expanded: [], focus: focus.value })
+      ? flattenLeaves({
+          levels: flatLevels.value,
+          expanded: [],
+          focus: focus.value,
+          filter: parsedFilter.value,
+        })
       : flattenLevels({ levels: levels.value, expanded: expanded.value, focus: focus.value }),
   );
 
   const usableRoots = computed(() => roots.value.filter((root) => root.exists));
   const rootPaths = computed(() => usableRoots.value.map((root) => root.path));
+
+  /**
+   * Every directory this browser has actually read, for the "Create in" picker.
+   *
+   * Deliberately not "every folder on disk": levels are fetched lazily, so this is exactly
+   * what the view can honestly offer - the mounts, plus whatever has been expanded. Typing
+   * a path that is not in here stays allowed; the preflight is the authority on whether it
+   * exists, not this list.
+   */
+  const knownDirectories = computed<string[]>(() => {
+    const known = new Set<string>(rootPaths.value);
+    for (const level of [...Object.values(levels.value), ...Object.values(flatLevels.value)]) {
+      for (const node of level.nodes) {
+        if (node.exists && node.inScope && node.kind === 'directory') known.add(node.path);
+      }
+    }
+    return [...known].sort((a, b) => a.localeCompare(b));
+  });
+
   const unwritableRoots = computed(() =>
     roots.value.filter((root) => root.exists && !root.writable),
   );
@@ -137,9 +175,12 @@ export const usePathsStore = defineStore('paths', () => {
   }
 
   function requestFor(paths: readonly string[]): Parameters<typeof storageApi.matrix>[0] {
+    // An unreadable filter is never sent: the server rejects it, and a toast saying
+    // "validation failed" is a worse answer than the bar's own "unclosed {".
+    const active = parsedFilter.value.active;
     return {
       paths,
-      ...(filter.value.trim().length === 0 ? {} : { filter: filter.value.trim() }),
+      ...(active ? { filter: filter.value.trim(), filterMode: filterMode.value } : {}),
       ...(instanceFilter.value.length === 0 ? {} : { instanceIds: instanceFilter.value }),
     };
   }
@@ -341,60 +382,26 @@ export const usePathsStore = defineStore('paths', () => {
     if (value) await loadFlatView();
   }
 
-  /** "Show more" on a summary row: the next page of the same level. */
-  async function loadMore(path: string): Promise<void> {
-    const level = levels.value[levelKey(path === TOP_LEVEL ? null : path)];
-    if (level === undefined) return;
-    const paths = path === TOP_LEVEL ? [] : [path];
-    if (paths.length === 0) return;
-
-    const response = await storageApi.matrix({
-      ...requestFor(paths),
-      limit: level.limit,
-      offset: level.offset + level.nodes.length,
-    });
-
-    // Append rather than replace: paging must not throw away what is already on screen.
-    const next = { ...levels.value };
-    for (const fetched of response.levels) {
-      const key = levelKey(fetched.path);
-      const known = next[key];
-      next[key] =
-        known === undefined
-          ? fetched
-          : { ...fetched, offset: known.offset, nodes: [...known.nodes, ...fetched.nodes] };
-    }
-    levels.value = next;
-  }
-
-  /** Reveal everything in one level, paged from the top. One request, not two. */
-  async function showAll(path: string): Promise<void> {
-    loadingPaths.value = { ...loadingPaths.value, [path]: true };
-    try {
-      const response = await storageApi.matrix({
-        paths: [path],
-        only: ['all'],
-        ...(filter.value.trim().length === 0 ? {} : { filter: filter.value.trim() }),
-      });
-      mergeLevels(response);
-    } catch (caught) {
-      ui.notify('error', `Could not read ${path}: ${messageOf(caught)}`);
-    } finally {
-      const next = { ...loadingPaths.value };
-      delete next[path];
-      loadingPaths.value = next;
-    }
-  }
-
-  /** One request for every open level - the reason `path` is repeatable. */
-  async function refetchOpen(): Promise<void> {
-    const open = expanded.value.filter((path) => levels.value[path] !== undefined);
-    await fetchLevels(open);
-  }
-
-  async function setFilter(value: string): Promise<void> {
+  /**
+   * Applying a filter is a reload, not a refetch of the open levels.
+   *
+   * The spine - every mount down to every root folder - is filtered server-side too, so a
+   * pattern like `movies/{4k,main}` narrows the whole tree on the way down rather than
+   * only the levels that happen to be open. The flat list is its own crawl, so it re-runs
+   * instead (see `loadFlatView`).
+   */
+  async function setFilter(value: string, mode?: PathFilterMode): Promise<void> {
     filter.value = value;
-    await refetchOpen();
+    if (mode !== undefined) filterMode.value = mode;
+    if (parsedFilter.value.error !== null) return;
+    if (flatView.value) await loadFlatView();
+    else await reload({ refresh: false });
+  }
+
+  /** The negation toggle: same patterns, opposite answer. */
+  async function setFilterMode(mode: PathFilterMode): Promise<void> {
+    if (filterMode.value === mode) return;
+    await setFilter(filter.value, mode);
   }
 
   /**
@@ -473,6 +480,8 @@ export const usePathsStore = defineStore('paths', () => {
     focus,
     flatView,
     filter,
+    filterMode,
+    parsedFilter,
     instanceFilter,
     measurements,
     measuring,
@@ -484,6 +493,7 @@ export const usePathsStore = defineStore('paths', () => {
     rows,
     usableRoots,
     rootPaths,
+    knownDirectories,
     unwritableRoots,
     brokenRoots,
     unseenNodes,
@@ -500,9 +510,8 @@ export const usePathsStore = defineStore('paths', () => {
     expandAll,
     collapseAll,
     setFlatView,
-    loadMore,
-    showAll,
     setFilter,
+    setFilterMode,
     setInstanceFilter,
     focusOn,
     clearFocus,

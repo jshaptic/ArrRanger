@@ -1,8 +1,10 @@
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
-import { PATH_SEVERITIES, PATH_USES } from '@arrranger/shared';
+import { PATH_SEVERITIES, PATH_USES, parsePathFilter, passesPathFilter } from '@arrranger/shared';
 import type {
   ArrRootFolder,
+  PathFilter,
+  PathFilterMode,
   FsRoot,
   MappingMismatch,
   PathFlag,
@@ -47,7 +49,13 @@ export interface PathMatrixQuery {
   /** Directories to expand. Empty means "the spine": mounts down to each root folder. */
   readonly paths?: readonly string[];
   readonly only?: readonly PathSelector[];
+  /**
+   * The folder filter: whitespace-separated brace patterns, expanded here rather than in
+   * the browser because selection happens before anything is stat'd (see {@link assemble}).
+   */
   readonly filter?: string;
+  /** `exclude` inverts the filter - the negation toggle. Defaults to `include`. */
+  readonly filterMode?: PathFilterMode;
   readonly limit?: number;
   readonly offset?: number;
   readonly sort?: PathSort;
@@ -79,6 +87,8 @@ interface LevelContext {
   readonly space: SpaceResolver;
   /** True when an instance filter is on, so folders nobody selected has an opinion on drop out. */
   readonly scoped: boolean;
+  /** Expanded once per request: every level is filtered by the same patterns. */
+  readonly filter: PathFilter;
 }
 
 export const DEFAULT_LIMIT = 200;
@@ -147,6 +157,7 @@ export class PathMatrixService {
         : indexes,
       space: new SpaceResolver(rootsResponse.roots),
       scoped: wanted.length > 0,
+      filter: parsePathFilter(query.filter ?? '', query.filterMode ?? 'include'),
     };
 
     const requested = (query.paths ?? []).map((entry) => normalisePath(entry));
@@ -233,13 +244,20 @@ export class PathMatrixService {
 
     // Small levels behave exactly like the old explorer: everything, fully probed.
     const small = candidates.length <= FULL_LEVEL_ENTRIES;
-    const selectors = query.only ?? (small ? ['all'] : ['problems']);
+    // Naming folders is an explicit request for them, whatever state they are in: a
+    // pattern must never be ANDed with the "problems only" default and come back empty.
+    // Excluding is not such a request - it says nothing about the rows it leaves behind -
+    // so a big level stays summarised there.
+    const named = ctx.filter.active && ctx.filter.mode === 'include';
+    const selectors = query.only ?? (small || named ? ['all'] : ['problems']);
     const wantsProbe = small || selectors.some((s) => s === 'empty' || s === 'unreadable');
 
-    const filter = query.filter?.trim().toLowerCase() ?? '';
     // do not reorder: selecting before probing is the whole performance story.
     const matched = candidates.filter((candidate) => {
-      if (filter.length > 0 && !candidate.name.toLowerCase().includes(filter)) return false;
+      // A mount, and anything with a root folder below it, is how the tree reaches the
+      // folders a pattern names - a pattern starting deeper says nothing about them.
+      const navigable = (levelPath === null && candidate.inScope) || candidate.containsRootFolder;
+      if (!passesPathFilter(ctx.filter, candidate.path, { navigable })) return false;
       if (ctx.scoped && !inScopedTree(candidate)) return false;
       return selectors.some((selector) => matchesSelector(candidate, selector, scope));
     });
@@ -477,7 +495,12 @@ export class PathMatrixService {
   // -------------------------------------------------------------------- owners
 
   /**
-   * The instances that use this exact path. Usually exactly one.
+   * The instances that use this path, and everything the owner card states about each.
+   *
+   * "Use" is deliberately wider than "something of yours sits at exactly this path". A
+   * parent folder is in use by every instance that roots *below* it, whether or not a
+   * single item has been downloaded yet - a fresh library with no media would otherwise
+   * report no owner at all, which is the one thing this column must never say wrongly.
    *
    * An unreachable instance is skipped entirely rather than contributing an `unknown`
    * entry: it is never an owner, and the response says so once, in `columns`.
@@ -494,9 +517,31 @@ export class PathMatrixService {
       const folder: ArrRootFolder | undefined = index.rootFolders.get(candidate.path);
       const title = index.mediaAt.get(candidate.path) ?? null;
       const mediaUnder = index.mediaUnder.get(candidate.path) ?? 0;
+      // A linear scan over one instance's root folders, which are a handful of paths -
+      // and only for the rows actually returned, never for the whole candidate set.
+      const rootFoldersUnder = index.rootFolderPrefixes
+        .filter((prefix) => prefix !== candidate.path && isAtOrUnder(prefix, candidate.path))
+        .sort((a, b) => a.length - b.length || a.localeCompare(b));
+      // Named, and including the ones aimed below: the card lists them, because a list
+      // is what refills a folder after it is pruned or re-pointed.
+      const importLists = index.importLists.filter((list) =>
+        isAtOrUnder(list.path, candidate.path),
+      );
 
       const use: PathUse | null =
-        folder !== undefined ? 'rootFolder' : title !== null ? 'tracked' : mediaUnder > 0 ? 'ancestor' : null;
+        folder !== undefined
+          ? 'rootFolder'
+          : title !== null
+            ? 'tracked'
+            : rootFoldersUnder.length > 0
+              ? 'containsRoot'
+              : mediaUnder > 0
+                ? 'ancestor'
+                // Only a list aimed at *exactly* this folder is a claim on it. One aimed
+                // below says something about that folder, not about this one.
+                : importLists.some((list) => list.path === candidate.path)
+                  ? 'importList'
+                  : null;
       if (use === null) continue;
 
       owners.push({
@@ -507,7 +552,12 @@ export class PathMatrixService {
         rootFolderId: folder?.id ?? null,
         accessible: folder?.accessible ?? null,
         mediaUnder,
+        mediaWithFiles: index.mediaWithFilesUnder.get(candidate.path) ?? 0,
         title,
+        rootFoldersUnder,
+        importLists,
+        freeSpace: folder?.freeSpace ?? null,
+        totalSpace: folder?.totalSpace ?? null,
       });
     }
 

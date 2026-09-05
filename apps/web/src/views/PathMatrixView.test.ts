@@ -1,6 +1,7 @@
 import type {
   Instance,
   NewQueueItem,
+  PathFilterMode,
   PathMatrixColumn,
   PathMatrixLevel,
   PathMatrixResponse,
@@ -67,7 +68,12 @@ function owner(instanceId: number, use: PathUse, overrides: Partial<PathOwner> =
     rootFolderId: use === 'rootFolder' ? ROOT_FOLDERS[instanceId]?.[0]?.id ?? 0 : null,
     accessible: use === 'rootFolder' ? (ROOT_FOLDERS[instanceId]?.[0]?.accessible ?? true) : null,
     mediaUnder: use === 'rootFolder' ? 0 : 3,
+    mediaWithFiles: use === 'rootFolder' ? 0 : 3,
     title: use === 'tracked' ? 'Dune' : null,
+    rootFoldersUnder: use === 'containsRoot' ? ['/data/media/movies'] : [],
+    importLists: [],
+    freeSpace: use === 'rootFolder' ? 1_000_000_000 : null,
+    totalSpace: use === 'rootFolder' ? 4_000_000_000 : null,
     ...overrides,
   };
 }
@@ -122,14 +128,37 @@ const MOUNT = node('/data', {
   owners: [owner(1, 'ancestor'), owner(2, 'ancestor')],
   canAddRootFolder: true,
 });
-const MEDIA = node('/data/media', { owners: [owner(1, 'ancestor'), owner(2, 'ancestor')] });
+const MEDIA = node('/data/media', {
+  owners: [
+    // No media of its own anywhere below: its only claim is the root folder one level
+    // down, which is exactly the case that used to render as an unowned folder.
+    owner(2, 'containsRoot', {
+      mediaUnder: 0,
+      mediaWithFiles: 0,
+      rootFoldersUnder: ['/data/media/tv'],
+      importLists: [
+        { id: 8, name: 'Series watchlist', enabled: true, automatic: true, path: '/data/media/tv' },
+        { id: 9, name: 'Kids picks', enabled: false, automatic: false, path: '/data/media/tv' },
+      ],
+    }),
+    owner(1, 'ancestor'),
+  ],
+});
 
 // Root folders are leaves: the library below them is not this view's to manage. Each
 // instance roots at its own subfolder - one owner per folder, the layout this view assumes.
 const MOVIES = node('/data/media/movies', {
   flags: ['rootFolder'],
   expandable: false,
-  owners: [owner(1, 'rootFolder', { mediaUnder: 812 })],
+  owners: [
+    owner(1, 'rootFolder', {
+      mediaUnder: 812,
+      mediaWithFiles: 806,
+      importLists: [
+        { id: 3, name: 'Trakt watchlist', enabled: true, automatic: true, path: '/data/media/movies' },
+      ],
+    }),
+  ],
   canAddRootFolder: false,
 });
 const TV = node('/data/media/tv', {
@@ -202,6 +231,8 @@ let unreachableIds: number[] = [];
 interface MatrixCall {
   readonly paths?: readonly string[];
   readonly instanceIds?: readonly number[];
+  readonly filter?: string;
+  readonly filterMode?: PathFilterMode;
 }
 
 /** Only the folders the requested instances own - the server scopes the tree, not the client. */
@@ -370,6 +401,13 @@ async function mountView() {
 const rowFor = (wrapper: Awaited<ReturnType<typeof mountView>>, needle: string) =>
   wrapper.findAll('tbody tr').find((row) => row.text().includes(needle));
 
+/** The one way to create a folder now: the toolbar, whatever the selection is. */
+async function openNewFolders(wrapper: Awaited<ReturnType<typeof mountView>>) {
+  const open = wrapper.findAll('button').find((button) => button.text().includes('New folder(s)'));
+  await open?.trigger('click');
+  for (let tick = 0; tick < 4; tick += 1) await flushPromises();
+}
+
 /** By path, because rendered names collide: /elsewhere/movies vs /data/media/movies. */
 const rowAt = (wrapper: Awaited<ReturnType<typeof mountView>>, path: string) =>
   wrapper.find(`[data-path="${path}"]`);
@@ -400,7 +438,6 @@ describe('PathMatrixView', () => {
     const row = rowFor(wrapper, 'old-movies');
 
     expect(row?.text()).toContain('not a root folder');
-    expect(wrapper.text()).toContain('1 not used as a root folder');
   });
 
   it('flags a root folder an instance cannot reach', async () => {
@@ -412,6 +449,29 @@ describe('PathMatrixView', () => {
   it('never renders a mount badge - the leading slash already says it', async () => {
     const wrapper = await mountView();
     expect(rowAt(wrapper, '/data').text()).not.toContain('mount');
+  });
+
+  it('says root folder with the colour of the name, not with a badge', async () => {
+    const wrapper = await mountView();
+    const row = rowAt(wrapper, '/data/media/movies');
+
+    // The most common state in the table, on every row the view is organised around: a
+    // badge there was 79 identical chips saying what the row is about.
+    expect(row.find('th').text()).not.toContain('root folder');
+    expect(row.find('[data-name]').classes()).toContain('text-sync');
+    // A folder that is nobody's root folder keeps the plain name and gains a badge.
+    expect(rowAt(wrapper, '/data/media/old-movies').find('[data-name]').classes()).toContain('text-ink');
+  });
+
+  it('states what is wrong beside the name, not in a column of its own', async () => {
+    const wrapper = await mountView();
+
+    expect(wrapper.findAll('thead th').map((cell) => cell.text())).not.toContain('State');
+
+    // Badge and glyph both live in the path cell, next to the name they describe.
+    const row = rowAt(wrapper, '/data/media/old-movies');
+    expect(row.find('th').text()).toContain('not a root folder');
+    expect(row.find('th [data-severity="own"]').exists()).toBe(true);
   });
 
   it('does not offer to expand a root folder', async () => {
@@ -446,8 +506,9 @@ describe('PathMatrixView', () => {
     const wrapper = await mountView();
     const row = rowFor(wrapper, 'elsewhere');
 
+    // The row says it - the fleet-wide totals line above the table is gone, and the
+    // badge on the row is where that fact belongs.
     expect(row?.text()).toContain('not mounted here');
-    expect(wrapper.text()).toContain('1 not mounted here');
   });
 
   // ------------------------------------------------------------- one chip, not a grid
@@ -528,22 +589,75 @@ describe('PathMatrixView', () => {
     expect(push).not.toHaveBeenCalled();
   });
 
-  it('clicking an owning root-folder chip stages its removal from that instance', async () => {
+  it('a chip opens a card stating what that instance does with the folder', async () => {
     const wrapper = await mountView();
-    const chip = rowAt(wrapper, '/data/media/movies').find('[data-owner="rootFolder"]');
+    await rowAt(wrapper, '/data/media/movies').find('[data-owner="rootFolder"]').trigger('click');
+    await flushPromises();
 
-    await chip.trigger('click');
+    const card = document.body.querySelector('[data-testid="owner-card"]');
+    expect(card?.textContent).toContain('Radarr-4K');
+    expect(card?.textContent).toContain('root folder here');
+    // Tracked and on disk are separate facts: the gap is the backlog, not missing media.
+    expect(card?.textContent).toContain('812 items at or under here');
+    expect(card?.textContent).toContain('806 on disk');
+    expect(card?.textContent).toContain('6 monitored, not downloaded');
+    expect(card?.textContent).toContain('Trakt watchlist - adds automatically');
+  });
+
+  it('the card is where a root folder is removed, so the action is named before it runs', async () => {
+    const wrapper = await mountView();
+    await rowAt(wrapper, '/data/media/movies').find('[data-owner="rootFolder"]').trigger('click');
+    await flushPromises();
+
+    const remove = [...document.body.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'Remove root folder',
+    );
+    expect(remove).toBeDefined();
+    remove?.click();
     await flushPromises();
 
     expect(document.body.textContent).toContain('Radarr-4K');
     expect(document.body.textContent).toContain('/data/media/movies');
+    // Still nothing staged until the dialog confirms it.
+    expect(push).not.toHaveBeenCalled();
   });
 
-  it('an owner that merely holds media below is not clickable', async () => {
+  it('an owner that merely holds media below is explained, never removable', async () => {
     const wrapper = await mountView();
-    const chip = rowAt(wrapper, '/data/media/old-movies').find('[data-owner="ancestor"]');
+    await rowAt(wrapper, '/data/media/old-movies').find('[data-owner="ancestor"]').trigger('click');
+    await flushPromises();
 
-    expect(chip.attributes('disabled')).toBeDefined();
+    const card = document.body.querySelector('[data-testid="owner-card"]');
+    expect(card?.textContent).toContain('holds media below this folder');
+    expect(
+      [...document.body.querySelectorAll('button')].some(
+        (button) => button.textContent?.trim() === 'Remove root folder',
+      ),
+    ).toBe(false);
+  });
+
+  it('a parent folder names the instances rooted below it, media or not', async () => {
+    const wrapper = await mountView();
+    const chip = rowAt(wrapper, '/data/media').find('[data-owner="containsRoot"]');
+
+    // The bug this replaced: Radarr-HD tracks nothing under /data/media, so a media-only
+    // rule left the folder its root folder lives in looking like nobody's.
+    expect(chip.exists()).toBe(true);
+    expect(chip.text()).toContain('Radarr-HD');
+    // One count, per instance, and a zero rather than a bare chip: the fleet-wide Media
+    // column cannot say that this instance tracks nothing here.
+    expect(chip.find('[data-metric="media"]').text()).toContain('0');
+
+    await chip.trigger('click');
+    await flushPromises();
+
+    const card = document.body.querySelector('[data-testid="owner-card"]');
+    expect(card?.textContent).toContain('1 root folder below this one');
+    expect(card?.textContent).toContain('nothing tracked here');
+    // Every list, named, with where it lands - not a count.
+    expect(card?.textContent).toContain('2 lists add below here');
+    expect(card?.textContent).toContain('tv: Series watchlist - adds automatically');
+    expect(card?.textContent).toContain('tv: Kids picks - disabled');
   });
 
   // ------------------------------------------------------------------ monitoring
@@ -618,6 +732,58 @@ describe('PathMatrixView', () => {
     expect(rowAt(wrapper, '/data/media/spare').text()).not.toContain('?');
   });
 
+  // ------------------------------------------------------- the folder filter
+
+  async function type(wrapper: Awaited<ReturnType<typeof mountView>>, value: string) {
+    const input = wrapper.find('[data-testid="path-filter-input"]');
+    await input.setValue(value);
+    await input.trigger('change');
+    for (let tick = 0; tick < 6; tick += 1) await flushPromises();
+  }
+
+  it('expands braces and asks for every pattern in one request', async () => {
+    const wrapper = await mountView();
+    matrixApi.mockClear();
+
+    await type(wrapper, 'media/{movies,tv}');
+
+    expect(matrixApi.mock.calls[0]?.[0]?.filter).toBe('media/{movies,tv}');
+    expect(matrixApi.mock.calls[0]?.[0]?.filterMode).toBe('include');
+  });
+
+  it('the exclude toggle re-asks with the same patterns', async () => {
+    const wrapper = await mountView();
+    await type(wrapper, 'media/{movies,tv}');
+    matrixApi.mockClear();
+
+    await wrapper.find('[data-testid="path-filter-mode"] [data-mode="exclude"]').trigger('click');
+    for (let tick = 0; tick < 6; tick += 1) await flushPromises();
+
+    expect(matrixApi.mock.calls[0]?.[0]?.filterMode).toBe('exclude');
+    expect(matrixApi.mock.calls[0]?.[0]?.filter).toBe('media/{movies,tv}');
+  });
+
+  it('a filter it cannot read is explained, and never asked for', async () => {
+    const wrapper = await mountView();
+    matrixApi.mockClear();
+
+    await type(wrapper, 'media/{movies,tv');
+
+    expect(matrixApi).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-testid="path-filter-error"]').text()).toContain('unclosed');
+  });
+
+  it('dims the folders kept only as a way down to a match', async () => {
+    const wrapper = await mountView();
+    await type(wrapper, 'media/movies');
+
+    // `/data/media` is not a match - it is how the tree reaches one.
+    expect(rowAt(wrapper, '/data/media').find('[data-name]').classes()).toContain('opacity-45');
+    expect(rowAt(wrapper, '/data/media/movies').find('[data-name]').classes()).not.toContain(
+      'opacity-45',
+    );
+  });
+
   // ------------------------------------------------ the fleet bar as a filter
 
   it('the fleet bar filters the tree rather than picking action targets', async () => {
@@ -657,7 +823,7 @@ describe('PathMatrixView', () => {
 
   // ------------------------------------------------- the whole point of the merge
 
-  it('summarises a folder still full of films instead of rendering 814 rows', async () => {
+  it('never turns a folder still full of films into 814 rows', async () => {
     const wrapper = await mountView();
 
     const twisty = rowAt(wrapper, '/data/media/old-movies').findAll('button')[0];
@@ -667,35 +833,12 @@ describe('PathMatrixView', () => {
     const rows = wrapper.findAll('tbody tr');
     expect(rows.length).toBeLessThan(15);
 
-    // The rollup states the truth even though only the problems are on screen.
-    const summary = rows.find((row) => row.text().includes('of 814 folders here'));
-    expect(summary).toBeDefined();
-    expect(summary?.text()).toContain('806 tracked');
-    expect(summary?.text()).toContain('4 untracked');
-    expect(summary?.text()).toContain('2 missing');
-    expect(summary?.text()).toContain('show all 814');
-
     // Only the folders that need attention became rows.
     expect(wrapper.text()).toContain('Orphan Film (1999)');
     expect(wrapper.text()).toContain('Gone (2001)');
-  });
 
-  it('says what a search matched, not the whole folder state', async () => {
-    const wrapper = await mountView();
-    const twisty = rowAt(wrapper, '/data/media/old-movies').findAll('button')[0];
-    await twisty?.trigger('click');
-    for (let tick = 0; tick < 4; tick += 1) await flushPromises();
-
-    const search = wrapper.find('input[type="search"]');
-    await search.setValue('orphan');
-    await search.trigger('change');
-    for (let tick = 0; tick < 6; tick += 1) await flushPromises();
-
-    // During a search the folder's own state counts describe rows that are not on
-    // screen, so they are left out and the line says what it is really counting.
-    const summary = wrapper.findAll('tbody tr').find((row) => row.text().includes('match'));
-    expect(summary?.text()).toContain('of 814 folders here match');
-    expect(summary?.text()).not.toContain('tracked');
+    // And nothing sums up what was left out: the table is folders, and only folders.
+    expect(wrapper.text()).not.toContain('of 814 folders here');
   });
 
   it('badges what is tracked, untracked and missing inside that folder', async () => {
@@ -725,6 +868,97 @@ describe('PathMatrixView', () => {
 
     expect(row.text()).not.toContain('prune');
     expect(row.text()).not.toContain('rename');
+  });
+
+  it('creates folders from one toolbar button, never from a row', async () => {
+    const wrapper = await mountView();
+
+    expect(wrapper.find('tbody').text()).not.toContain('new folder');
+    expect(wrapper.text()).toContain('New folder(s)');
+  });
+
+  it('a selected folder only chooses where the new-folder box starts', async () => {
+    const wrapper = await mountView();
+    await rowAt(wrapper, '/data/media/movies').find('input[type="checkbox"]').setValue(true);
+    await openNewFolders(wrapper);
+
+    const parent = document.body.querySelector<HTMLInputElement>(
+      '[data-testid="new-folders-parent"]',
+    );
+    expect(parent?.value).toBe('/data/media/movies');
+    wrapper.unmount();
+  });
+
+  it('the create-in picker offers the folders this view has read, and narrows as you type', async () => {
+    const wrapper = await mountView();
+    await openNewFolders(wrapper);
+
+    // Closed until asked for: the field is pre-filled, and a list under a filled field was
+    // exactly what the old datalist got wrong.
+    expect(document.body.querySelector('[data-testid="new-folders-parent-list"]')).toBeNull();
+
+    document.body
+      .querySelector('[data-testid="new-folders-parent-toggle"]')
+      ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    for (let tick = 0; tick < 2; tick += 1) await flushPromises();
+
+    const list = () => document.body.querySelector('[data-testid="new-folders-parent-list"]');
+    expect(list()?.textContent).toContain('/data/media/movies');
+    expect(list()?.textContent).toContain('/data/media/old-movies');
+
+    const input = document.body.querySelector<HTMLInputElement>(
+      '[data-testid="new-folders-parent"]',
+    );
+    if (input) {
+      input.value = 'old';
+      input.dispatchEvent(new Event('input'));
+    }
+    for (let tick = 0; tick < 2; tick += 1) await flushPromises();
+
+    expect(list()?.textContent).toContain('/data/media/old-movies');
+    expect(list()?.textContent).not.toContain('/data/media/tv');
+
+    // Picking one fills the field and closes the list.
+    list()?.querySelector('li')?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    for (let tick = 0; tick < 2; tick += 1) await flushPromises();
+
+    expect(input?.value).toBe('/data/media/old-movies');
+    expect(list()).toBeNull();
+    wrapper.unmount();
+  });
+
+  it('opens ready to create the path only *Arr believes in, and stages exactly it', async () => {
+    const wrapper = await mountView();
+    const twisty = rowAt(wrapper, '/data/media/old-movies').findAll('button')[0];
+    await twisty?.trigger('click');
+    for (let tick = 0; tick < 4; tick += 1) await flushPromises();
+
+    await rowFor(wrapper, 'Gone (2001)')?.find('input[type="checkbox"]').setValue(true);
+    await openNewFolders(wrapper);
+
+    const parent = document.body.querySelector<HTMLInputElement>(
+      '[data-testid="new-folders-parent"]',
+    );
+    const source = document.body.querySelector<HTMLInputElement>(
+      '[data-testid="new-folders-input"]',
+    );
+    expect(parent?.value).toBe('/data/media/old-movies');
+    // Escaped, because a space is a folder separator in this box - and it stages as one.
+    expect(source?.value).toBe(String.raw`Gone\ (2001)`);
+
+    const stage = [...document.body.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('mkdir'),
+    );
+    stage?.click();
+    for (let tick = 0; tick < 6; tick += 1) await flushPromises();
+
+    expect(push.mock.calls[0]?.[0]).toEqual([
+      {
+        op: 'fs.mkdir',
+        payload: { path: '/data/media/old-movies/Gone (2001)', recursive: true },
+      },
+    ]);
+    wrapper.unmount();
   });
 
   it('pruning requires typing the folder name, then stages one fs.delete', async () => {

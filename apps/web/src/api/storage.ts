@@ -1,5 +1,6 @@
 import type {
   FsMeasurement,
+  PathFilterMode,
   FsOp,
   FsPreflight,
   FsRootsResponse,
@@ -14,6 +15,8 @@ export interface MatrixParams {
   readonly paths?: readonly string[];
   readonly only?: readonly PathSelector[];
   readonly filter?: string;
+  /** `exclude` inverts the filter. Absent means `include`. */
+  readonly filterMode?: PathFilterMode;
   readonly limit?: number;
   readonly offset?: number;
   /** Show only these instances' folders. Empty means the whole fleet. */
@@ -26,7 +29,10 @@ function matrixQuery(params: MatrixParams): string {
   const query = new URLSearchParams();
   for (const target of params.paths ?? []) query.append('path', target);
   if (params.only !== undefined && params.only.length > 0) query.set('only', params.only.join(','));
-  if (params.filter !== undefined && params.filter.length > 0) query.set('q', params.filter);
+  if (params.filter !== undefined && params.filter.length > 0) {
+    query.set('q', params.filter);
+    if (params.filterMode !== undefined) query.set('qmode', params.filterMode);
+  }
   if (params.limit !== undefined) query.set('limit', String(params.limit));
   if (params.offset !== undefined && params.offset > 0) query.set('offset', String(params.offset));
   // Repeatable too: one filtered request for every open level, not one per instance.

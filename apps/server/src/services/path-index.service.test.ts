@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import type { ArrMedia, ArrRootFolder, Instance } from '@arrranger/shared';
+import type { ArrImportList, ArrMedia, ArrRootFolder, Instance } from '@arrranger/shared';
 import type { InstancesRepository } from '../repositories/instances.repo.js';
 import {
   isAtOrUnder,
@@ -36,12 +36,28 @@ function media(id: number, path: string, title = `Title ${String(id)}`): ArrMedi
   return { id, title, path, qualityProfileId: 0, monitored: true, tags: [] };
 }
 
+function importList(id: number, rootFolderPath: string, overrides: Partial<ArrImportList> = {}): ArrImportList {
+  return {
+    id,
+    name: `List ${String(id)}`,
+    implementation: 'TraktListImport',
+    configContract: 'TraktListSettings',
+    enabled: true,
+    rootFolderPath,
+    qualityProfileId: 0,
+    tags: [],
+    fields: [],
+    ...overrides,
+  };
+}
+
 /** A stand-in for the two services the index reads through. */
 function serviceFor(
   fleet: ReadonlyArray<{
     instance: Instance;
     rootFolders?: readonly ArrRootFolder[];
     media?: readonly ArrMedia[];
+    importLists?: readonly ArrImportList[];
     fails?: boolean;
     cached?: boolean;
   }>,
@@ -67,6 +83,12 @@ function serviceFor(
       fetches += 1;
       return entry?.rootFolders ?? [];
     },
+    importLists: async (id: number) => {
+      const entry = find(id);
+      if (entry?.fails === true) throw new Error('instance did not answer');
+      fetches += 1;
+      return entry?.importLists ?? [];
+    },
     peekMediaLibrary: (id: number) => {
       const entry = find(id);
       return entry?.cached === false ? null : (entry?.media ?? []);
@@ -74,6 +96,12 @@ function serviceFor(
     peekRootFolders: (id: number) => {
       const entry = find(id);
       return entry?.cached === false ? null : (entry?.rootFolders ?? []);
+    },
+    // Deliberately null on a cache miss *and* harmless: no guard reads import lists, so
+    // the index must still build without them.
+    peekImportLists: (id: number) => {
+      const entry = find(id);
+      return entry?.cached === false ? null : (entry?.importLists ?? []);
     },
   } as unknown as ResourcesService;
 
@@ -176,6 +204,52 @@ describe('PathIndexService', () => {
     assert.match(failed?.error ?? '', /did not answer/);
     assert.equal(failed?.rootFolders.size, 0);
     assert.equal(failed?.mediaUnder.size, 0);
+  });
+
+  test('indexes import lists by the folder they fill, and never by an unset one', async () => {
+    const { service } = serviceFor([
+      {
+        instance: instance(),
+        rootFolders: [rootFolder('/data/media')],
+        importLists: [
+          // *Arr stores the target as a plain string, trailing separator and all.
+          importList(1, '/data/media/', { enableAuto: true }),
+          importList(2, '/data/media', { name: 'Second list' }),
+          // An unconfigured list. Normalising this would claim the whole filesystem.
+          importList(3, ''),
+        ],
+      },
+    ]);
+
+    const [index] = await service.index();
+
+    assert.deepEqual(
+      index?.importLists.map((list) => list.path),
+      ['/data/media', '/data/media'],
+      'the unset one claims nothing - normalising it would claim the whole filesystem',
+    );
+    assert.equal(index?.importLists[0]?.automatic, true);
+    assert.equal(index?.importLists[1]?.automatic, false);
+  });
+
+  test('counts what is on disk separately from what is merely tracked', async () => {
+    const { service } = serviceFor([
+      {
+        instance: instance(),
+        rootFolders: [rootFolder('/data/media')],
+        media: [
+          { ...media(10, '/data/media/films/Dune (2021)'), hasFile: true },
+          // Monitored, never downloaded: tracked at every ancestor, on disk at none.
+          { ...media(11, '/data/media/films/Dune Part Three (2029)'), hasFile: false },
+        ],
+      },
+    ]);
+
+    const [index] = await service.index();
+
+    assert.equal(index?.mediaUnder.get('/data/media/films'), 2);
+    assert.equal(index?.mediaWithFilesUnder.get('/data/media/films'), 1);
+    assert.equal(index?.mediaWithFilesUnder.get('/data/media'), 1, 'and at every ancestor');
   });
 
   test('skips instances that are disabled', async () => {

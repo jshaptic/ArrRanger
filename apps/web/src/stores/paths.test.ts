@@ -166,7 +166,7 @@ describe('usePathsStore', () => {
     expect(store.rows.map((row) => row.node?.path)).toEqual(['/data']);
   });
 
-  it('refetches every open level in one request when the filter changes', async () => {
+  it('re-reads the spine when the filter changes, so the whole tree narrows', async () => {
     handler = (params) =>
       Promise.resolve(
         response(
@@ -180,57 +180,75 @@ describe('usePathsStore', () => {
     await store.load();
     calls.length = 0;
 
-    await store.setFilter('dune');
+    await store.setFilter('movies/4k');
 
-    // One request carrying every open path - the reason `path` is repeatable.
+    // The spine is filtered server-side too, so a pattern narrows every level on the way
+    // down - not only the ones that happened to be open.
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.paths).toEqual(['/data']);
-    expect(calls[0]?.filter).toBe('dune');
+    expect(calls[0]?.paths).toEqual([]);
+    expect(calls[0]?.filter).toBe('movies/4k');
+    expect(calls[0]?.filterMode).toBe('include');
+    expect(store.parsedFilter.patterns).toEqual(['movies/4k']);
   });
 
-  it('appends when paging a level rather than replacing what is on screen', async () => {
-    const first = level('/data', [node('/data/a')], {
-      rollup: rollup({ entries: 3 }),
-      matched: 3,
-      truncated: true,
-      limit: 1,
-    });
-
-    handler = (params) =>
-      Promise.resolve(
-        response(
-          (params.paths ?? []).length === 0
-            ? [level(null, [node('/data')]), first]
-            : [level('/data', [node('/data/b')], { offset: 1, limit: 1, matched: 3, truncated: true })],
-        ),
-      );
+  it('the negation toggle re-asks with the same patterns', async () => {
+    handler = () => Promise.resolve(response([level(null, [node('/data')])]));
 
     const store = usePathsStore();
     await store.load();
-    await store.loadMore('/data');
+    await store.setFilter('movies/{4k,main}');
+    calls.length = 0;
 
-    expect(store.levels['/data']?.nodes.map((entry) => entry.path)).toEqual([
-      '/data/a',
-      '/data/b',
-    ]);
+    await store.setFilterMode('exclude');
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.filter).toBe('movies/{4k,main}');
+    expect(calls[0]?.filterMode).toBe('exclude');
+    expect(store.parsedFilter.patterns).toEqual(['movies/4k', 'movies/main']);
+
+    // Asking for the mode it is already in is not a request.
+    await store.setFilterMode('exclude');
+    expect(calls).toHaveLength(1);
   });
 
-  it('asks for everything in one request when showing all', async () => {
-    handler = (params) =>
-      Promise.resolve(
-        response(
-          (params.paths ?? []).length === 0 ? [level(null, [node('/data')])] : [level('/data', [])],
-        ),
-      );
+  it('never sends a filter it could not read', async () => {
+    handler = () => Promise.resolve(response([level(null, [node('/data')])]));
 
     const store = usePathsStore();
     await store.load();
     calls.length = 0;
 
-    await store.showAll('/data');
+    await store.setFilter('movies/{4k,main');
 
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.only).toEqual(['all']);
+    expect(calls).toHaveLength(0);
+    expect(store.parsedFilter.error).toMatch(/unclosed/);
+  });
+
+  it('the flat list drops folders kept only as a way down to a match', async () => {
+    handler = (params) => {
+      const paths = params.paths ?? [];
+      if (paths.length === 0) return Promise.resolve(response([level(null, [node('/data')])]));
+      return Promise.resolve(
+        response(
+          paths.map((path) =>
+            path === '/data'
+              ? // `/data/movies` is on the way to a match; `/data/series` is one itself.
+                level('/data', [
+                  node('/data/movies', { expandable: false }),
+                  node('/data/series', { expandable: false }),
+                ])
+              : level(path, []),
+          ),
+        ),
+      );
+    };
+
+    const store = usePathsStore();
+    await store.load();
+    await store.setFilter('series');
+    await store.setFlatView(true);
+
+    expect(store.rows.map((row) => row.node?.path)).toEqual(['/data/series']);
   });
 
   it('re-roots at a focused path', async () => {

@@ -1,18 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import type { PathNode } from '@arrranger/shared';
+import { matchPathFilter, type PathNode } from '@arrranger/shared';
 import BaseButton from '@/components/base/BaseButton.vue';
 import EmptyState from '@/components/base/EmptyState.vue';
 import FleetBar from '@/components/fleet/FleetBar.vue';
+import NewFoldersDialog from '@/components/paths/NewFoldersDialog.vue';
+import PathFilterBar from '@/components/paths/PathFilterBar.vue';
 import PathRowView from '@/components/paths/PathRowView.vue';
-import RollupSummary from '@/components/paths/RollupSummary.vue';
 import AddPathDialog from '@/components/roots/AddPathDialog.vue';
 import RemapDialog from '@/components/roots/RemapDialog.vue';
 import RemoveRootFoldersDialog from '@/components/roots/RemoveRootFoldersDialog.vue';
 import DiskOperationModal, { type DiskOperation } from '@/components/storage/DiskOperationModal.vue';
 import ReconcileDialog from '@/components/storage/ReconcileDialog.vue';
-import { breadcrumbs } from '@/lib/fs-tree';
+import { basename, breadcrumbs, parentOf } from '@/lib/fs-tree';
 import { formatBytes, formatRelativeTime } from '@/lib/format';
+import { quoteFolderName } from '@/lib/new-folders';
 import { rootFolderTargets, trackedBy, unknownColumns, type PathAction } from '@/lib/path-matrix';
 import { useMatrixStore } from '@/stores/matrix';
 import { usePathsStore } from '@/stores/paths';
@@ -27,9 +29,9 @@ const remapping = ref<string | null>(null);
 const removing = ref<RootFolderTarget[] | null>(null);
 const reconciling = ref<string | null>(null);
 const operation = ref<{ operation: DiskOperation; target: string } | null>(null);
+const creating = ref<{ parent: string; source: string } | null>(null);
 
 const selected = ref<string[]>([]);
-const search = ref('');
 
 const columns = computed(() => paths.columns);
 
@@ -42,12 +44,19 @@ const columns = computed(() => paths.columns);
  */
 const unknown = computed(() => unknownColumns(columns.value));
 
-/** What the fleet bar filters the tree to, by name, for the summary rows. */
-const filteredNames = computed(() =>
-  paths.instanceFilter
-    .map((id) => columns.value.find((column) => column.instanceId === id)?.name ?? `instance ${String(id)}`)
-    .sort((a, b) => a.localeCompare(b, 'en')),
-);
+/**
+ * A row kept only because a pattern *might* continue below it.
+ *
+ * The server cannot tell whether a match lies under a level it was not asked to read, so
+ * it keeps the way down open. Saying which rows are the answer and which are the road to
+ * it is the browser's job, and it is the same verdict on both sides - see
+ * `paths.parsedFilter`.
+ */
+function onTheWay(node: PathNode): boolean {
+  const filter = paths.parsedFilter;
+  if (!filter.active || filter.mode === 'exclude') return false;
+  return matchPathFilter(filter, node.path) !== 'full';
+}
 
 const crumbs = computed(() =>
   paths.focus === null ? [] : breadcrumbs(paths.focus, paths.rootPaths),
@@ -93,9 +102,6 @@ function runAction(node: PathNode, action: PathAction): void {
     case 'reconcile':
       reconciling.value = node.path;
       return;
-    case 'mkdir':
-      operation.value = { operation: 'mkdir', target: node.path };
-      return;
     case 'rename':
       operation.value = { operation: 'rename', target: node.path };
       return;
@@ -108,6 +114,31 @@ function runAction(node: PathNode, action: PathAction): void {
     case 'focus':
       void paths.focusOn(node.path);
       return;
+  }
+}
+
+/**
+ * Where "New folder(s)…" starts from.
+ *
+ * Creating folders is not a row action any more - one dialog per folder is the wrong shape
+ * for `{movies,series}/{russian,western}/4k` - but the row still knows the answer people
+ * usually want, so a single selected folder becomes the directory to create in. A selected
+ * folder that does *not* exist is the other case worth keeping: it is a path only *Arr
+ * believes in, and the fix is to create exactly it, so the box opens pre-filled with its
+ * name inside its parent.
+ */
+function openCreate(): void {
+  const only = selectedNodes.value.length === 1 ? selectedNodes.value[0] : undefined;
+
+  if (only !== undefined && !only.exists && only.inScope) {
+    creating.value = {
+      parent: parentOf(only.path) ?? '',
+      source: quoteFolderName(basename(only.path)),
+    };
+  } else if (only !== undefined && only.exists && only.kind === 'directory') {
+    creating.value = { parent: only.path, source: '' };
+  } else {
+    creating.value = { parent: paths.focus ?? paths.rootPaths[0] ?? '', source: '' };
   }
 }
 
@@ -252,36 +283,12 @@ environment:
         </span>
       </div>
 
-      <!-- totals -->
-      <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
-        <span class="text-muted">{{ paths.totals.rootFolderPaths }} root folder path(s)</span>
-        <span v-if="paths.totals.candidates > 0" class="text-drift">
-          {{ paths.totals.candidates }} not used as a root folder
-        </span>
-        <span v-if="paths.totals.untracked > 0" class="text-drift">
-          {{ paths.totals.untracked }} untracked
-        </span>
-        <span v-if="paths.totals.missing > 0" class="text-danger">
-          {{ paths.totals.missing }} missing on disk
-        </span>
-        <span v-if="paths.totals.unseenRootFolders > 0" class="text-danger">
-          {{ paths.totals.unseenRootFolders }} not mounted here
-        </span>
-        <span v-if="paths.totals.unmanaged > 0" class="text-drift">
-          {{ paths.totals.unmanaged }} media path(s) under no root folder
-        </span>
-      </div>
+      <!-- the filter gets its own row: it expands into a pattern list and a syntax card,
+           neither of which belongs squeezed between the buttons -->
+      <PathFilterBar />
 
       <!-- toolbar -->
       <div class="flex flex-wrap items-center gap-2">
-        <input
-          v-model="search"
-          type="search"
-          placeholder="Filter folder names…"
-          class="h-9 w-48 rounded-md border border-line bg-raised px-3 text-sm text-ink outline-none focus:border-accent"
-          @change="paths.setFilter(search)"
-        />
-
         <div v-if="!paths.flatView" class="flex items-center gap-1">
           <BaseButton size="sm" variant="ghost" :disabled="paths.busy" @click="paths.expandAll()">
             Expand all
@@ -322,6 +329,14 @@ environment:
         <div class="ml-auto flex flex-wrap items-center gap-2">
           <BaseButton size="sm" :loading="paths.loading" @click="rescan">
             Rescan
+          </BaseButton>
+          <BaseButton
+            size="sm"
+            data-testid="new-folders-open"
+            title="Create one folder, or a whole shape at once - the same syntax mkdir -p takes"
+            @click="openCreate()"
+          >
+            New folder(s)…
           </BaseButton>
           <BaseButton
             size="sm"
@@ -400,6 +415,21 @@ environment:
         />
       </div>
 
+      <!-- a filter that matched nothing is a different answer from an empty tree, and the
+           way out of it is a button, not a paragraph about FS_ROOTS -->
+      <EmptyState
+        v-else-if="paths.rows.length === 0 && paths.parsedFilter.active"
+        :title="`No folder ${paths.filterMode === 'exclude' ? 'is left by' : 'matches'} this filter`"
+        :description="
+          paths.filterMode === 'exclude'
+            ? `All ${paths.parsedFilter.patterns.length} pattern(s) together hide everything in view.`
+            : `${paths.parsedFilter.patterns.length} pattern(s), none of them naming a folder in view. Patterns match whole folder names once they contain a “/” - “movies/4k”, not “movies/4”.`
+        "
+        icon="🔍"
+      >
+        <BaseButton size="sm" @click="paths.setFilter('')">Clear the filter</BaseButton>
+      </EmptyState>
+
       <EmptyState
         v-else-if="paths.rows.length === 0"
         title="Nothing to show"
@@ -422,7 +452,8 @@ environment:
               <tr>
                 <th
                   scope="col"
-                  class="sticky left-0 z-20 min-w-[20rem] border-b border-line bg-raised px-3 py-2 text-left text-[11px] font-semibold text-muted"
+                  class="sticky left-0 z-20 min-w-[24rem] border-b border-line bg-raised px-3 py-2 text-left text-[11px] font-semibold text-muted"
+                  title="A root folder is green. What is wrong with a folder is stated at the right of this column, next to the name it describes"
                 >
                   Path
                 </th>
@@ -447,9 +478,6 @@ environment:
                 >
                   Free
                 </th>
-                <th class="border-b border-l border-line bg-raised px-2 py-2 text-left text-[11px] font-semibold text-muted">
-                  State
-                </th>
                 <th class="border-b border-l border-line bg-raised px-2 py-2 text-right text-[11px] font-semibold text-muted">
                   Row actions
                 </th>
@@ -457,39 +485,29 @@ environment:
             </thead>
 
             <tbody>
-              <template v-for="row in paths.rows" :key="row.key">
-                <PathRowView
-                  v-if="row.kind === 'node' && row.node"
-                  :node="row.node"
-                  :depth="row.depth"
-                  :flat="paths.flatView"
-                  :unknown-count="unknown.length"
-                  :expanded="row.expanded"
-                  :child-severity="row.childSeverity"
-                  :busy="queue.busy"
-                  :loading="paths.isLoadingPath(row.node.path)"
-                  :selected="selected.includes(row.node.path)"
-                  :measured="paths.measurements[row.node.path]?.sizeOnDisk ?? null"
-                  :measuring="paths.measuring[row.node.path] === true"
-                  :staged-for-path="queue.stagedForPath(row.node.path)"
-                  :staged-for-cell="queue.stagedForRootFolder"
-                  @toggle="paths.toggle(row.node.path)"
-                  @select="toggleSelected(row.node.path)"
-                  @measure="paths.measure(row.node.path)"
-                  @action="runAction(row.node, $event)"
-                  @owner-remove="removeOwner(row.node, $event)"
-                />
-                <RollupSummary
-                  v-else-if="row.kind === 'rollup' && row.level"
-                  :level="row.level"
-                  :depth="row.depth"
-                  :busy="paths.isLoadingPath(row.levelPath)"
-                  :filter="paths.filter"
-                  :instance-names="filteredNames"
-                  @show-more="paths.loadMore(row.levelPath)"
-                  @show-all="paths.showAll(row.levelPath)"
-                />
-              </template>
+              <PathRowView
+                v-for="row in paths.rows"
+                :key="row.key"
+                :node="row.node"
+                :depth="row.depth"
+                :flat="paths.flatView"
+                :unknown-count="unknown.length"
+                :expanded="row.expanded"
+                :on-the-way="onTheWay(row.node)"
+                :child-severity="row.childSeverity"
+                :busy="queue.busy"
+                :loading="paths.isLoadingPath(row.node.path)"
+                :selected="selected.includes(row.node.path)"
+                :measured="paths.measurements[row.node.path]?.sizeOnDisk ?? null"
+                :measuring="paths.measuring[row.node.path] === true"
+                :staged-for-path="queue.stagedForPath(row.node.path)"
+                :staged-for-cell="queue.stagedForRootFolder"
+                @toggle="paths.toggle(row.node.path)"
+                @select="toggleSelected(row.node.path)"
+                @measure="paths.measure(row.node.path)"
+                @action="runAction(row.node, $event)"
+                @owner-remove="removeOwner(row.node, $event)"
+              />
             </tbody>
           </table>
         </div>
@@ -510,6 +528,12 @@ environment:
       :paths="adding.paths"
       :preselect="adding.preselect"
       @close="adding = null"
+    />
+    <NewFoldersDialog
+      v-if="creating"
+      :parent="creating.parent"
+      :source="creating.source"
+      @close="creating = null"
     />
     <RemapDialog v-if="remapping" :from-path="remapping" @close="remapping = null" />
     <RemoveRootFoldersDialog v-if="removing" :targets="removing" @close="removing = null" />

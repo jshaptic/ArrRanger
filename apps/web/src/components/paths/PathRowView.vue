@@ -5,7 +5,7 @@ import BaseButton from '@/components/base/BaseButton.vue';
 import PathFlagBadge from './PathFlagBadge.vue';
 import PathOwnerChips from './PathOwnerChips.vue';
 import { formatBytes, formatRelativeTime } from '@/lib/format';
-import { actionsFor, mediaSummary, SEVERITY_STYLES, type PathAction } from '@/lib/path-matrix';
+import { actionsFor, FLAG_STYLES, mediaSummary, SEVERITY_STYLES, type PathAction } from '@/lib/path-matrix';
 import { stagedIntent, TONE_CLASSES } from '@/lib/staging';
 
 const props = defineProps<{
@@ -19,6 +19,11 @@ const props = defineProps<{
   /** Instances that could not be read, so an empty Used-by cell is not read as "nobody". */
   unknownCount: number;
   expanded: boolean;
+  /**
+   * Kept by the filter only as a way down to something that might match, rather than
+   * being a match itself. Dimmed, so a filtered tree still reads as an answer.
+   */
+  onTheWay?: boolean;
   /** Worst severity inside this node, when its level is loaded. */
   childSeverity: PathSeverity | null;
   busy: boolean;
@@ -43,7 +48,6 @@ const ACTION_LABELS: Record<Exclude<PathAction, 'focus'>, string> = {
   remove: 'remove',
   remap: 're-map',
   reconcile: 'align',
-  mkdir: 'new folder',
   rename: 'rename',
   move: 'move',
   prune: 'prune',
@@ -56,10 +60,37 @@ const canFocus = computed(() => !props.flat && allActions.value.includes('focus'
 const intent = computed(() => stagedIntent(props.stagedForPath));
 const media = computed(() => mediaSummary(props.node));
 
-/** `mount` drives behaviour (a mount is never renameable) but needs no badge. */
-const badges = computed(() => props.node.flags.filter((flag) => flag !== 'mount'));
+/**
+ * The badges that still need words.
+ *
+ * `mount` drives behaviour (a mount is never renameable) and the leading slash already
+ * says it. `rootFolder` is now the folder's *colour*: it is the single most common state
+ * in the table, on every row the view is organised around, and a green name says it
+ * without spending a badge - which leaves the badge row meaning "something is off here".
+ */
+const badges = computed(() =>
+  props.node.flags.filter((flag) => flag !== 'mount' && flag !== 'rootFolder'),
+);
 
 const severity = computed(() => SEVERITY_STYLES[props.node.severity]);
+
+/**
+ * Why the glyph is there, in the badge vocabulary rather than in flag ids.
+ *
+ * A root folder its own instance cannot see is the one severity with no flag behind it,
+ * so it has to name itself or the glyph would appear with an empty reason.
+ */
+const severityTitle = computed(() => {
+  if (badges.value.length > 0) {
+    return `This folder needs attention: ${badges.value.map((flag) => FLAG_STYLES[flag].label).join(', ')}`;
+  }
+  if (props.node.owners.some((owner) => owner.use === 'rootFolder' && owner.accessible === false)) {
+    return 'An instance reports its own root folder here as not accessible';
+  }
+  return props.node.lowSpace
+    ? 'This filesystem is below the low-space threshold'
+    : 'This folder needs attention';
+});
 
 /**
  * A dimmed warning for a collapsed folder whose children need attention, so a problem two
@@ -89,14 +120,23 @@ const label = computed(() =>
 );
 
 const nameClasses = computed(() => {
-  if (!props.node.exists) return 'text-danger line-through';
-  if (intent.value?.tone === 'destroy') return 'text-danger line-through';
-  return 'text-ink';
+  const classes: string[] = [];
+  // Dimmed rather than hidden: this folder is the route to a match, not a match.
+  if (props.onTheWay === true) classes.push('opacity-45');
+
+  if (!props.node.exists || intent.value?.tone === 'destroy') {
+    return [...classes, 'text-danger', 'line-through'];
+  }
+  // The badge this replaced. Colour scales where a badge does not: a fleet of 79 root
+  // folders used to be 79 identical chips saying the thing the row is about.
+  return [...classes, props.node.flags.includes('rootFolder') ? 'text-sync' : 'text-ink'];
 });
 
 /** The disk facts that do not earn a column of their own, in one tooltip. */
 const diskTitle = computed(() => {
   const lines = [props.node.path];
+  if (props.onTheWay === true) lines.push('on the way to a match - it does not match the filter itself');
+  if (props.node.flags.includes('rootFolder')) lines.push('a root folder - hence the green name');
   if (props.node.modifiedAt !== null) lines.push(`modified ${formatRelativeTime(props.node.modifiedAt)}`);
   if (props.node.exists && props.node.inScope) {
     lines.push(props.node.readable ? (props.node.writable ? 'read-write' : 'read-only') : 'no read access');
@@ -160,25 +200,11 @@ const spaceTitle = computed(() => {
         </template>
 
         <span
-          v-if="severity"
-          class="shrink-0 text-[11px]"
-          :class="severity.classes"
-          :title="`This folder needs attention: ${badges.join(', ')}`"
-          data-severity="own"
+          data-name
+          class="min-w-0 flex-1 truncate font-mono"
+          :class="nameClasses"
+          :title="diskTitle"
         >
-          {{ severity.glyph }}
-        </span>
-        <span
-          v-else-if="inheritedSeverity"
-          class="shrink-0 text-[11px] opacity-40"
-          :class="inheritedSeverity.classes"
-          title="Something inside this folder needs attention"
-          data-severity="child"
-        >
-          {{ inheritedSeverity.glyph }}
-        </span>
-
-        <span class="min-w-0 flex-1 truncate font-mono" :class="nameClasses" :title="diskTitle">
           {{ label }}
         </span>
 
@@ -193,6 +219,12 @@ const spaceTitle = computed(() => {
           ⌖
         </button>
 
+        <!-- What is wrong with this folder, right where its name is, and in one reading
+             order: the states, then anything staged against them, then the glyph that
+             summarises the lot. The old State column put all three a full table away
+             from the name they describe. -->
+        <PathFlagBadge v-for="flag in badges" :key="flag" :flag="flag" class="shrink-0" />
+
         <span
           v-if="intent"
           class="shrink-0 rounded border px-1.5 py-0.5 text-[10px]"
@@ -200,6 +232,25 @@ const spaceTitle = computed(() => {
           :title="`${intent.label} is staged for this folder`"
         >
           {{ intent.icon }} staged
+        </span>
+
+        <span
+          v-if="severity"
+          class="w-3 shrink-0 text-right text-[11px]"
+          :class="severity.classes"
+          :title="severityTitle"
+          data-severity="own"
+        >
+          {{ severity.glyph }}
+        </span>
+        <span
+          v-else-if="inheritedSeverity"
+          class="w-3 shrink-0 text-right text-[11px] opacity-40"
+          :class="inheritedSeverity.classes"
+          title="Something inside this folder needs attention"
+          data-severity="child"
+        >
+          {{ inheritedSeverity.glyph }}
         </span>
       </div>
     </th>
@@ -245,13 +296,6 @@ const spaceTitle = computed(() => {
     >
       <span v-if="node.lowSpace" data-low-space="true">⚠ </span>
       {{ node.freeSpace === null ? '—' : formatBytes(node.freeSpace) }}
-    </td>
-
-    <!-- state -->
-    <td class="border-b border-l border-line px-2 py-1.5">
-      <div class="flex flex-wrap gap-1">
-        <PathFlagBadge v-for="flag in badges" :key="flag" :flag="flag" />
-      </div>
     </td>
 
     <td class="border-b border-l border-line px-2 py-1.5 text-right whitespace-nowrap">

@@ -111,14 +111,38 @@ export interface MappingMismatch {
 
 /** How one instance uses one path, lowest precedence first. */
 export const PATH_USES = [
+  /**
+   * An import list adds media here, and the instance neither roots nor tracks anything
+   * at this path. On its own that is a misconfiguration - a list pointing at a folder
+   * nobody roots at - which is why it earns a chip rather than silence.
+   */
+  'importList',
   /** It has media strictly *under* this path - the folder's reason to exist. */
   'ancestor',
+  /**
+   * One or more of its root folders live strictly *under* this path.
+   *
+   * The parent of a root folder is in use by that instance whether or not a single item
+   * has been downloaded yet, so this is what an empty-but-configured library reports.
+   */
+  'containsRoot',
   /** It has a media item at exactly this path. */
   'tracked',
   /** It has a root folder at exactly this path. */
   'rootFolder',
 ] as const;
 export type PathUse = (typeof PATH_USES)[number];
+
+/** One import list, reduced to what a folder's owner card needs. */
+export interface PathImportList {
+  readonly id: number;
+  readonly name: string;
+  readonly enabled: boolean;
+  /** `enableAuto` (Radarr) / `enableAutomaticAdd` (Sonarr): it adds without being asked. */
+  readonly automatic: boolean;
+  /** The folder it adds to, which is this path or somewhere under it. */
+  readonly path: string;
+}
 
 /**
  * One instance's claim on one path. Usually there is exactly one per row.
@@ -141,8 +165,42 @@ export interface PathOwner {
   readonly accessible: boolean | null;
   /** Media items this instance tracks at or under this path. */
   readonly mediaUnder: number;
+  /**
+   * Of `mediaUnder`, the items it actually holds a file for.
+   *
+   * The gap between the two is the monitored-but-not-downloaded backlog, which is a fact
+   * about the instance rather than about the disk - so the card states both numbers and
+   * never lets one stand in for the other.
+   */
+  readonly mediaWithFiles: number;
   /** Title of the media item at this exact path, when there is one. */
   readonly title: string | null;
+  /**
+   * Its root folders strictly *under* this path, nearest first.
+   *
+   * The reason a parent folder shows a chip at all when the library below it is still
+   * empty: a configured root folder is use, and waiting for the first download to admit
+   * it made the tree lie about who owns what.
+   */
+  readonly rootFoldersUnder: readonly string[];
+  /**
+   * Every import list on this instance that adds media at or under this path, the ones
+   * targeting it exactly first.
+   *
+   * Named rather than counted, and including the ones aimed below: a list is the thing
+   * that refills a folder after it is pruned or re-pointed, so "which list" is the
+   * actionable half and each entry carries its own `path` to say where it lands.
+   */
+  readonly importLists: readonly PathImportList[];
+  /**
+   * Free/total space *Arr itself reports for its root folder here.
+   *
+   * Deliberately separate from `PathNode.freeSpace`, which is what *this* container's
+   * `statfs` says: when the two disagree the instance is looking at a different volume,
+   * and only showing both can say so.
+   */
+  readonly freeSpace: number | null;
+  readonly totalSpace: number | null;
 }
 
 /**

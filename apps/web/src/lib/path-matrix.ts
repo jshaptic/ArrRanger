@@ -1,12 +1,17 @@
 import {
+  matchPathFilter,
   PATH_SEVERITIES,
+  type PathFilter,
   type PathFlag,
+  type PathImportList,
   type PathMatrixColumn,
   type PathMatrixLevel,
   type PathNode,
   type PathOwner,
   type PathSeverity,
+  type PathUse,
 } from '@arrranger/shared';
+import { formatBytes, pluralise } from './format';
 
 /**
  * Turning the server's levels into table rows.
@@ -15,19 +20,13 @@ import {
  * which is what makes the "a library must never become 812 rows" rule testable.
  */
 
-export type PathRowKind = 'node' | 'rollup';
-
 export interface PathRow {
-  readonly kind: PathRowKind;
   /** Stable across re-renders: `:v-for` keys on it. */
   readonly key: string;
   readonly depth: number;
   /** The directory this row belongs to. */
   readonly levelPath: string;
-  /** Set for a node row. */
-  readonly node: PathNode | null;
-  /** Set for a rollup row - the level it summarises. */
-  readonly level: PathMatrixLevel | null;
+  readonly node: PathNode;
   readonly expanded: boolean;
   /** True when a level for this node has been fetched. */
   readonly hasLevel: boolean;
@@ -45,6 +44,15 @@ export interface FlattenInput {
   readonly levels: Readonly<Record<string, PathMatrixLevel>>;
   readonly expanded: readonly string[];
   readonly focus: string | null;
+  /**
+   * The active folder filter, when there is one.
+   *
+   * The server already dropped everything a filter excludes, but it has to keep the
+   * folders a pattern only *reaches through* - it cannot know whether a match lies below
+   * a level it was not asked for. In a tree those rows are the path to the answer; in a
+   * flat list they are noise, so {@link flattenLeaves} is the one place that re-checks.
+   */
+  readonly filter?: PathFilter | null;
 }
 
 /** The synthetic top level - mounts and paths this container cannot see - is keyed ''. */
@@ -57,8 +65,9 @@ export function levelKey(path: string | null): string {
 /**
  * Depth-first walk of the fetched levels.
  *
- * A rollup row is appended under an expanded level whenever its rows are a subset of
- * what is actually there - which is the normal case for a library folder.
+ * Every row is a folder. A level that returned a subset of what is really in the directory
+ * - a big library summarised to its problems, or a filtered level - says so nowhere in the
+ * table: the rows are what they are.
  */
 export function flattenLevels(input: FlattenInput): PathRow[] {
   const expanded = new Set(input.expanded);
@@ -84,34 +93,16 @@ export function flattenLevels(input: FlattenInput): PathRow[] {
       const isExpanded = expanded.has(childKey) && hasLevel;
 
       rows.push({
-        kind: 'node',
         key: `node:${childKey}`,
         depth,
         levelPath: key,
         node,
-        level: null,
         expanded: isExpanded,
         hasLevel,
         childSeverity: hasLevel ? input.levels[childKey]?.rollup.severity ?? null : null,
       });
 
       if (isExpanded) walk(childKey, depth + 1);
-    }
-
-    // The summary goes last, so it reads as a footer for the rows above it.
-    const child = input.levels[key];
-    if (child !== undefined && needsRollupRow(child)) {
-      rows.push({
-        kind: 'rollup',
-        key: `rollup:${key}`,
-        depth,
-        levelPath: key,
-        node: null,
-        level: child,
-        expanded: false,
-        hasLevel: true,
-        childSeverity: null,
-      });
     }
   };
 
@@ -135,8 +126,10 @@ export function flattenLevels(input: FlattenInput): PathRow[] {
  *
  * Anything that is not a directory - a file, a symlink - is dropped outright: this is a
  * folder list, and a level legitimately mixes directory and file candidates together.
- * Rollup rows are dropped for the same reason: a flat list is only meaningful once
- * nothing is left summarised.
+ *
+ * With a filter on, a leaf has to match it *itself*: a folder kept only because a pattern
+ * might have continued below it turned out to have nothing below it, so it is an answer
+ * to nothing. See {@link FlattenInput.filter}.
  */
 export function flattenLeaves(input: FlattenInput): PathRow[] {
   const rows: PathRow[] = [];
@@ -161,13 +154,13 @@ export function flattenLeaves(input: FlattenInput): PathRow[] {
         continue;
       }
 
+      if (!keepsLeaf(input.filter ?? null, childKey)) continue;
+
       rows.push({
-        kind: 'node',
         key: `leaf:${childKey}`,
         depth: 0,
         levelPath: key,
         node,
-        level: null,
         expanded: false,
         hasLevel,
         childSeverity: null,
@@ -177,72 +170,13 @@ export function flattenLeaves(input: FlattenInput): PathRow[] {
 
   const root = input.focus === null ? TOP_LEVEL : input.focus;
   walk(root);
-  return rows.sort((a, b) => (a.node?.path ?? '').localeCompare(b.node?.path ?? ''));
+  return rows.sort((a, b) => a.node.path.localeCompare(b.node.path));
 }
 
-/**
- * A level needs its counts spelled out when the rows on screen are not the whole story:
- * either more matched than were returned, or a selector hid some entirely.
- */
-export function needsRollupRow(level: PathMatrixLevel): boolean {
-  if (level.truncated) return true;
-  return level.matched < level.rollup.entries;
-}
-
-export interface RollupChip {
-  readonly label: string;
-  readonly count: number;
-  readonly tone: string;
-  readonly title: string;
-}
-
-/**
- * The counts worth showing, in the order they matter. `empty` and `unreadable` are
- * omitted when the server did not evaluate them - a null there means "not checked",
- * and rendering it as 0 would be a lie.
- */
-export function rollupChips(level: PathMatrixLevel): RollupChip[] {
-  const { rollup } = level;
-  const chips: RollupChip[] = [
-    {
-      label: 'tracked',
-      count: rollup.tracked,
-      tone: 'text-sync',
-      title: 'At least one instance has media at or under these folders',
-    },
-    {
-      label: 'untracked',
-      count: rollup.untracked,
-      tone: 'text-drift',
-      title: 'Inside a root folder, but no instance tracks anything here',
-    },
-    {
-      label: 'missing',
-      count: rollup.missing,
-      tone: 'text-danger',
-      title: 'An instance points at these paths and the disk does not have them',
-    },
-    {
-      label: 'not a root folder',
-      count: rollup.candidates,
-      tone: 'text-drift',
-      title: 'Sits alongside a root folder without being one',
-    },
-  ];
-
-  if (rollup.empty !== null) {
-    chips.push({ label: 'empty', count: rollup.empty, tone: 'text-muted', title: 'No entries on disk' });
-  }
-  if (rollup.unreadable !== null) {
-    chips.push({
-      label: 'no access',
-      count: rollup.unreadable,
-      tone: 'text-danger',
-      title: 'The container cannot read these - check PUID/PGID',
-    });
-  }
-
-  return chips.filter((chip) => chip.count > 0);
+/** In `exclude` mode everything the server returned is already an answer. */
+function keepsLeaf(filter: PathFilter | null, target: string): boolean {
+  if (filter === null || !filter.active || filter.mode === 'exclude') return true;
+  return matchPathFilter(filter, target) === 'full';
 }
 
 /** How a severity is rendered. `ok` and `info` are silent - a glyph on every row is noise. */
@@ -336,12 +270,174 @@ export function mediaSummary(node: PathNode): { label: string; detail: string } 
   return total === 0 ? null : { label: String(total), detail };
 }
 
+// ------------------------------------------------------------------ the owner card
+
+/**
+ * What one instance's claim on one folder says, in three registers: a headline, a couple
+ * of numbers small enough to sit on the chip, and the full breakdown for the card.
+ *
+ * All three are pure functions of one `PathOwner`, so the chip and the card can never
+ * disagree about what an instance is doing with a folder - the same reason the flag and
+ * severity vocabularies are computed once, server-side.
+ */
+
+/** The claim, in words. `containsRoot` counts, because "roots below" begs "how many". */
+export function ownerHeadline(owner: PathOwner): string {
+  switch (owner.use) {
+    case 'rootFolder':
+      return owner.accessible === false
+        ? 'root folder here - it cannot see it'
+        : 'root folder here';
+    case 'tracked':
+      return owner.title === null ? 'tracks an item at this path' : `tracks “${owner.title}” here`;
+    case 'containsRoot':
+      return `${pluralise(owner.rootFoldersUnder.length, 'root folder')} below this one`;
+    case 'ancestor':
+      return 'holds media below this folder';
+    case 'importList':
+      return 'an import list fills this folder';
+  }
+}
+
+/**
+ * The one number that belongs on the chip: how much of this folder is that instance's.
+ *
+ * The count the row's Media column cannot be. That column sums the fleet, so a 4K/HD
+ * split counts the same films twice there and neither number alone answers "how much of
+ * this is yours". Everything else an owner knows is a sentence, not a number, and reads
+ * as noise squeezed onto a chip - so it lives on the card.
+ *
+ * Always rendered, zero included: a chip with no number would leave "this instance tracks
+ * nothing here" indistinguishable from "we did not count".
+ */
+export interface OwnerMetric {
+  readonly value: number;
+  readonly title: string;
+}
+
+export function ownerMedia(owner: PathOwner): OwnerMetric {
+  return {
+    value: owner.mediaUnder,
+    title:
+      owner.mediaUnder === 0
+        ? `${owner.name}: nothing tracked at or under this folder`
+        : `${owner.name}: ${pluralise(owner.mediaUnder, 'item')} at or under this folder, ${String(owner.mediaWithFiles)} of them on disk`,
+  };
+}
+
+export interface OwnerFact {
+  readonly label: string;
+  readonly value: string;
+  /** Named things behind the number - list names, root folder paths. */
+  readonly detail: readonly string[];
+  readonly tone: 'normal' | 'warn' | 'muted';
+}
+
+/** A descendant path, said relative to the folder the card is about. */
+function relativeTo(target: string, base: string): string {
+  return target.startsWith(`${base}/`) ? target.slice(base.length + 1) : target;
+}
+
+/** "1 list adds here", "2 lists add here" - the verb has to agree with the count. */
+function adds(count: number): string {
+  return count === 1 ? 'adds' : 'add';
+}
+
+/**
+ * One list, with where it lands when that is not the folder being read - the whole point
+ * of naming the ones aimed below rather than counting them.
+ */
+function describeList(list: PathImportList, path: string): string {
+  const state = !list.enabled ? 'disabled' : list.automatic ? 'adds automatically' : 'manual add';
+  const target = list.path === path ? '' : `${relativeTo(list.path, path)}: `;
+  return `${target}${list.name} - ${state}`;
+}
+
+/**
+ * The card body. Every fact is stated even when it is a zero, because "no import list
+ * points here" and "we did not look" are different answers and only one of them is true.
+ */
+export function ownerFacts(owner: PathOwner, path: string): OwnerFact[] {
+  const facts: OwnerFact[] = [];
+
+  if (owner.mediaUnder === 0) {
+    facts.push({ label: 'Media', value: 'nothing tracked here', detail: [], tone: 'muted' });
+  } else {
+    const backlog = owner.mediaUnder - owner.mediaWithFiles;
+    facts.push({
+      label: 'Media',
+      value: `${pluralise(owner.mediaUnder, 'item')} at or under here`,
+      detail: [
+        `${String(owner.mediaWithFiles)} on disk`,
+        // The gap is a fact about the instance, not about the folder: a monitored film
+        // nobody has downloaded is *meant* to have no folder yet.
+        ...(backlog > 0 ? [`${String(backlog)} monitored, not downloaded`] : []),
+      ],
+      tone: 'normal',
+    });
+  }
+
+  if (owner.use === 'rootFolder') {
+    facts.push({
+      label: 'Root folder',
+      value: owner.accessible === false ? 'here, reported inaccessible' : 'here',
+      detail:
+        owner.freeSpace === null
+          ? []
+          : [
+              `${formatBytes(owner.freeSpace)} free${owner.totalSpace === null ? '' : ` of ${formatBytes(owner.totalSpace)}`}, as this instance sees it`,
+            ],
+      tone: owner.accessible === false ? 'warn' : 'normal',
+    });
+  }
+
+  // Every list, named, however deep it lands. The summary line says how they split
+  // between this folder and the ones under it, because that is what decides whether
+  // re-pointing *this* folder changes anything.
+  const here = owner.importLists.filter((list) => list.path === path).length;
+  const below = owner.importLists.length - here;
+
+  if (owner.importLists.length === 0) {
+    facts.push({ label: 'Import lists', value: 'none point here', detail: [], tone: 'muted' });
+  } else {
+    facts.push({
+      label: 'Import lists',
+      value:
+        here === 0
+          ? `${pluralise(below, 'list')} ${adds(below)} below here`
+          : below === 0
+            ? `${pluralise(here, 'list')} ${adds(here)} here`
+            : `${pluralise(here, 'list')} ${adds(here)} here, ${String(below)} below`,
+      detail: owner.importLists.map((list) => describeList(list, path)),
+      // A list filling a folder its instance does not root at is the one shape of this
+      // fact that is a question rather than a statement.
+      tone: owner.use === 'importList' ? 'warn' : 'normal',
+    });
+  }
+
+  return facts;
+}
+
+/** The square initials badge, coloured by app. Shared by the chip and the card header. */
+export const KIND_CLASSES: Record<PathOwner['kind'], string> = {
+  radarr: 'bg-amber-500/20 text-amber-300',
+  sonarr: 'bg-sky-500/20 text-sky-300',
+};
+
+/** Chip tone per claim. A root folder its own instance cannot see is the loud one. */
+export const USE_CLASSES: Record<PathUse, string> = {
+  rootFolder: 'border-sync/40 bg-sync/8 text-ink hover:border-sync/70',
+  tracked: 'border-line bg-transparent text-muted hover:border-line-strong',
+  containsRoot: 'border-line-strong bg-transparent text-muted hover:border-accent/60',
+  ancestor: 'border-line bg-transparent text-muted hover:border-line-strong',
+  importList: 'border-drift/50 bg-drift/10 text-drift',
+};
+
 export type PathAction =
   | 'addRoot'
   | 'remove'
   | 'remap'
   | 'reconcile'
-  | 'mkdir'
   | 'rename'
   | 'move'
   | 'prune'
@@ -354,11 +450,17 @@ export type PathAction =
  * for everything that removes or realigns, and the dialogs ask for everything that adds.
  * That is what lets the fleet bar be a filter rather than a hidden action target.
  *
- * Note what is deliberately absent: renaming an individual *media* folder is offered as
- * a plain disk rename, never as an align chain. `media.moveRootFolder` only sets
- * `rootFolderPath` and `media.refresh` re-reads each item's stored path, so nothing in
- * the current operation set can make *Arr adopt a renamed media folder - it would report
- * the item missing instead. Offering one would be a lie dressed as a feature.
+ * Two things are deliberately absent. Creating a folder was a row action, which meant one
+ * dialog per folder for the job that is never singular - laying out
+ * `{movies,series}/{russian,western}/4k`. It is one toolbar button now, taking the same
+ * brace expansion the filter does, so a row no longer has to be found before a folder that
+ * does not exist yet can be named.
+ *
+ * And renaming an individual *media* folder is offered as a plain disk rename, never as an
+ * align chain. `media.moveRootFolder` only sets `rootFolderPath` and `media.refresh`
+ * re-reads each item's stored path, so nothing in the current operation set can make *Arr
+ * adopt a renamed media folder - it would report the item missing instead. Offering one
+ * would be a lie dressed as a feature.
  */
 export function actionsFor(node: PathNode): PathAction[] {
   const flags = new Set<PathFlag>(node.flags);
@@ -378,16 +480,20 @@ export function actionsFor(node: PathNode): PathAction[] {
     actions.push('reconcile');
   }
 
-  if (flags.has('missing')) return actions.concat('mkdir');
+  if (flags.has('missing')) return actions;
 
   if (node.exists && node.kind === 'directory') {
-    actions.push('mkdir');
     if (!flags.has('mount')) {
       actions.push('rename', 'move');
-      // Pruning is only offered when nothing anywhere would lose media by it. An instance
-      // that did not answer is not an owner, so it contributes no media - the same
+      // Pruning is only offered when nothing anywhere would lose media by it, and when no
+      // instance roots below it: deleting the parent of an empty-but-configured root
+      // folder takes out a root folder that has no media to speak for it. An instance
+      // that did not answer is not an owner, so it contributes neither - the same
       // conclusion the old `!cell.known || cell.mediaUnder === 0` check reached.
-      if (!node.owners.some((owner) => owner.mediaUnder > 0)) actions.push('prune');
+      const holdsSomething = node.owners.some(
+        (owner) => owner.mediaUnder > 0 || owner.rootFoldersUnder.length > 0,
+      );
+      if (!holdsSomething) actions.push('prune');
     }
     if (node.expandable) actions.push('focus');
   }

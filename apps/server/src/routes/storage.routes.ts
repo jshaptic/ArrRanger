@@ -1,6 +1,8 @@
 import {
   FS_OPS,
+  PATH_FILTER_MODES,
   PATH_SELECTORS,
+  parsePathFilter,
   queuePayloadSchemas,
   type FsMeasurement,
   type FsOp,
@@ -29,7 +31,17 @@ const matrixQuery = z.object({
     .optional()
     .transform((value) => (value === undefined ? undefined : value.split(',')))
     .pipe(z.array(z.enum(PATH_SELECTORS)).nonempty().optional()),
-  q: z.string().optional(),
+  /**
+   * The folder filter: brace patterns, whitespace-separated. Rejected here rather than
+   * silently ignored - a filter nobody can read is a filter nobody can debug.
+   */
+  q: z
+    .string()
+    .optional()
+    .refine((value) => value === undefined || parsePathFilter(value).error === null, {
+      message: 'filter could not be read',
+    }),
+  qmode: z.enum(PATH_FILTER_MODES).optional(),
   limit: z.coerce.number().int().min(1).max(1000).optional(),
   offset: z.coerce.number().int().min(0).optional(),
   sort: z.enum(PATH_SORTS).optional(),
@@ -93,6 +105,7 @@ export const storageRoutes: FastifyPluginAsync = async (app) => {
       paths: query.path,
       ...(query.only === undefined ? {} : { only: query.only }),
       ...(query.q === undefined ? {} : { filter: query.q }),
+      ...(query.qmode === undefined ? {} : { filterMode: query.qmode }),
       ...(query.limit === undefined ? {} : { limit: query.limit }),
       ...(query.offset === undefined ? {} : { offset: query.offset }),
       ...(query.sort === undefined ? {} : { sort: query.sort }),

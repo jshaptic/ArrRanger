@@ -8,7 +8,13 @@ import { formatBytes } from '@/lib/format';
 import { usePathsStore } from '@/stores/paths';
 import { useQueueStore } from '@/stores/queue';
 
-export type DiskOperation = 'mkdir' | 'rename' | 'move' | 'delete';
+/**
+ * What this dialog still does to a folder that exists.
+ *
+ * Creating one left: it is `NewFoldersDialog` now, one box taking `mkdir -p` syntax for the
+ * whole shape at once, rather than a per-row dialog that could only ever make one.
+ */
+export type DiskOperation = 'rename' | 'move' | 'delete';
 
 const props = withDefaults(
   defineProps<{
@@ -29,7 +35,7 @@ const queue = useQueueStore();
 
 const parent = computed(() => parentOf(props.target) ?? props.target);
 
-const name = ref(props.operation === 'mkdir' ? '' : basename(props.target));
+const name = ref(basename(props.target));
 const destination = ref(props.operation === 'move' ? (parentOf(props.target) ?? '') : '');
 const recursive = ref(false);
 const force = ref(false);
@@ -39,7 +45,6 @@ const preflight = ref<FsPreflight | null>(null);
 const checking = ref(false);
 
 const TITLES: Record<DiskOperation, string> = {
-  mkdir: 'Create a directory',
   rename: 'Rename on disk',
   move: 'Move on disk',
   delete: 'Delete from disk',
@@ -50,9 +55,6 @@ const item = computed<NewFsQueueItem | null>(() => {
   const trimmed = name.value.trim();
 
   switch (props.operation) {
-    case 'mkdir':
-      if (trimmed.length === 0) return null;
-      return { op: 'fs.mkdir', payload: { path: joinPath(props.target, trimmed), recursive: recursive.value } };
     case 'rename':
       if (trimmed.length === 0 || trimmed === basename(props.target)) return null;
       return { op: 'fs.rename', payload: { from: props.target, to: joinPath(parent.value, trimmed) } };
@@ -122,8 +124,6 @@ async function stage(): Promise<void> {
 
 function describeStaging(): string {
   switch (props.operation) {
-    case 'mkdir':
-      return `a new directory ${name.value.trim()}`;
     case 'rename':
       return `the rename of ${basename(props.target)}`;
     case 'move':
@@ -160,23 +160,7 @@ watch([name, destination, recursive, force], () => void check());
       </section>
 
       <!-- inputs -->
-      <div v-if="props.operation === 'mkdir'" class="space-y-3">
-        <label class="block">
-          <span class="mb-1 block text-xs text-muted">New directory name</span>
-          <input
-            v-model="name"
-            type="text"
-            placeholder="movies-4k"
-            class="w-full rounded-md border border-line bg-raised px-3 py-2 font-mono text-sm text-ink outline-none focus:border-accent"
-          />
-        </label>
-        <label class="flex items-center gap-2 text-xs text-muted">
-          <input v-model="recursive" type="checkbox" class="accent-[var(--color-accent)]" />
-          create parent directories as needed
-        </label>
-      </div>
-
-      <label v-else-if="props.operation === 'rename'" class="block">
+      <label v-if="props.operation === 'rename'" class="block">
         <span class="mb-1 block text-xs text-muted">New name (stays in {{ parent }})</span>
         <input
           v-model="name"

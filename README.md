@@ -148,17 +148,12 @@ folder has to exist. So there is one table.
 that use it are a column - not the axis. That is the one place the fleet's column layout is
 deliberately dropped, because a folder is essentially never reused by two instances: each
 roots at its own subtree, so an instance axis would be N columns of dashes to express the
-single fact that Radarr owns this one. The width goes to disk facts and health instead:
+single fact that Radarr owns this one.
 
-```
-Path                    Used by      Media   Size     Modified   Free      State
-▾ /data                  ● Radarr     496     —        —          1.2 TB
-  ▾ media                ● Sonarr
-    ▸ movies             ● Radarr     384     2.1 TB   2d ago     1.2 TB    root folder
-    ▸ movies-4k          ● Radarr-4K  112     900 GB   5h ago     1.2 TB    root folder
-  ⚠ ▸ old-movies         —            814     1.4 TB   3mo ago    1.2 TB    not a root folder · unmanaged
-    ▸ tv                 ● Sonarr     220     3.0 TB   1h ago     1.2 TB    root folder
-```
+`movies`, `movies-4k` and `tv` are **green**: that is how the table says root folder. It is
+the most common state in the view and it is true of the rows the whole thing is organised
+around, so as a badge it was 79 identical chips restating what a row is for. Colour scales
+where a badge does not, and it leaves the badge row meaning *something here is off*.
 
 The rows form a lazily-expanded tree; the first load opens only the *spine* - every mount,
 and the directory chain down to each *Arr root folder. Everything below a root folder starts
@@ -176,9 +171,18 @@ An owner chip says how one instance uses the folder, in precedence order:
 
 | Use | Meaning |
 |---|---|
-| `rootFolder` | a root folder at exactly this path (click the chip to stage its removal) |
+| `rootFolder` | a root folder at exactly this path |
 | `tracked` | a media item at exactly this path |
+| `containsRoot` | one or more of its root folders live **under** here |
 | `ancestor` | media lives *under* here - the folder's reason to exist |
+| `importList` | an import list fills this folder, and the instance neither roots nor tracks here |
+
+`containsRoot` is why a parent folder is owned at all. Use is a structural fact, not a
+consequence of downloading: a freshly configured `tv/` with nothing in it yet still makes
+`/data/media` Sonarr's folder, and the older media-only rule rendered exactly that case -
+the empty library, the new instance, the season nobody has grabbed - as belonging to
+nobody. `importList` is the opposite case and the only `use` that is a question rather
+than a description: a list pouring media into a folder its own instance does not root at.
 
 An instance that uses the folder in none of those ways is simply **absent**, which is what
 replaced the old `inside`/`outside` cells: "inside a root folder and tracking nothing" is
@@ -190,12 +194,79 @@ not "nobody".
 Two instances rooting at one folder is legal and renders as two chips. It is supported, not
 optimised for, and it is deliberately *not* called drift.
 
+**The chip carries one count and the card carries the rest.** That count is this
+instance's share of the folder, which is the one thing the Media column beside it cannot
+be: that column sums the fleet, so a 4K/HD split counts the same films twice there and
+neither number alone answers "how much of this is yours". It is rendered even when it is
+`0`, because a bare chip could not tell "this instance tracks nothing here" from "we did
+not count". Everything else an owner knows is a sentence rather than a number and reads as
+noise squeezed onto a chip, so hovering or clicking opens the owner card:
+
+```
+● Radarr-4K ·812
+┌────────────────────────────────┐
+│ R4  Radarr-4K           radarr │
+│ root folder here               │
+│ ──────────────────────────────  │
+│ MEDIA    812 items at or under │
+│          806 on disk           │
+│          6 monitored, not      │
+│          downloaded            │
+│ ROOT     here                  │
+│ FOLDER   1.2 TB free of 4 TB,  │
+│          as this instance      │
+│          sees it               │
+│ IMPORT   2 lists add here,     │
+│ LISTS    1 below               │
+│          Trakt watchlist -     │
+│          adds automatically    │
+│          Kids picks - disabled │
+│          4k/: Radarr-4K sync - │
+│          manual add            │
+│                [ Remove root ] │
+└────────────────────────────────┘
+```
+
+Three of those facts exist because a chip could not hold them:
+
+- **tracked is not on disk.** `812 items` and `806 on disk` are different numbers, and the
+  gap is the monitored-but-not-downloaded backlog - a fact about the instance, not a
+  folder missing from the disk. The two are never collapsed into one count.
+- **free space is reported twice on purpose.** The `Free` column is this container's
+  `statfs`; the card's line is what *Arr itself reports for its root folder. When they
+  disagree, the instance is looking at a different volume - which is the mapping
+  diagnosis, stated per instance instead of only fleet-wide.
+- **import lists are what keeps refilling a folder.** Pruning or re-pointing a folder an
+  automatic list still targets undoes itself by the next sync, so every list that adds at
+  or under the folder is **named** on the card that offers the removal - the ones aimed
+  deeper prefixed with where they land. "Which list" is the actionable half; a count would
+  say a folder refills itself without saying what to go and turn off.
+
+Root folders below the folder are counted in the headline (`1 root folder below this one`)
+and not listed again underneath it. The count is what decides whether the folder is safe to
+touch; the paths are one expand away in the tree that is already on screen.
+
+Removing a root folder is a **button on the card**, not a bare click on the chip. The old
+behaviour staged a destructive change from an unlabelled click with nothing on screen
+saying so; the card names the instance, the folder and what it holds first. The card is
+teleported and positioned against the viewport rather than the row, because the table is a
+horizontal scroll container and would otherwise clip it.
+
 #### Monitoring
 
-Row badges are computed server-side so the vocabulary cannot drift: `root folder`,
+Row badges are computed server-side so the vocabulary cannot drift:
 **`not a root folder`**, `untracked`, `unmanaged`, `missing`, `not mounted here`, `empty`,
-`symlink`, `no access`, `read-only`. The second of those is the question the view exists to
+`symlink`, `no access`, `read-only`. The first of those is the question the view exists to
 answer - a folder sitting alongside your root folders that no instance roots at.
+
+**They sit beside the name, at the right of the Path column, and so does the glyph.** There
+is no State column: a folder's state is about that folder, and putting it a full table away
+from the name meant reading a row twice. The order within the cell is one sentence - the
+states, anything staged against them, then the glyph that summarises the lot:
+
+```
+▸ old-movies                    not a root folder · unmanaged  ✎ staged  ⚠
+```
 
 Those collapse into one **severity** per row, so a glance is enough and a problem two levels
 down is not invisible:
@@ -258,6 +329,50 @@ describing rows it had just removed.
 The bar keeps listing every instance whatever is selected, so the filter can always be turned
 off, and a summary row says what it is counting: `3 of 814 folders here belong to Radarr-4K`.
 
+#### The folder filter
+
+The search box speaks the same brace expansion a shell does, because the question people
+actually have about a media tree is not "which folder is called `doramas`" but "show me
+exactly these 231 feed folders and nothing else":
+
+```
+{animation/{movies,series},movies,series,shows}/{requested,curated-feed}/{0k,main,4k}
+```
+
+- **Whitespace separates patterns.** Any of them matching is a match, so one box takes two
+  unrelated trees. Quote (`"TV Shows"`) or escape (`TV\ Shows`) a space that belongs to a
+  folder name - a brace inside quotes is text, exactly as in a shell.
+- **A bare word still searches**: `matrix` matches any folder whose name contains it, which
+  is what the plain box always did. Anything with a `/` in it is matched **whole segment by
+  whole segment**, so `movies/4k` finds `/data/media/movies/4k` and everything under it.
+- **Globs work inside one segment**: `*-feed`, `?k`, and ranges expand too - `season{01..12}`,
+  `{a..f}`, `{1..9..2}`.
+- **The toggle beside the box negates it.** `exclude` hides everything the same patterns
+  name, and everything under it.
+
+Expansion happens in `@arrranger/shared` and runs on **both** sides for the same reason the
+instance filter is server-side: the server filters the levels it returns (before any
+per-child `stat`, like `only` and `limit`), and the browser needs the identical verdict to
+finish the job the server cannot.
+
+That job is the difference between a match and the way to one. A pattern that names
+`animation/movies/anime` says nothing about `animation` - but that folder is the only way
+down to the answer, and the server cannot know whether a match lies below a level nobody
+asked it to read. So folders on the way stay visible and are **dimmed**, mounts and anything
+with a root folder below it are never filtered away at all, and the flat list - where there
+is no tree to walk - shows only the folders that matched in their own right. In `exclude`
+mode nothing is protected: hiding what was named is the whole point.
+
+A pattern also overrides the "problems only" default a big level falls back to: naming
+folders is an explicit request for them whatever state they are in, so `q` implies
+`only=all` (excluding does not - it says nothing about the rows it leaves behind).
+
+A filter that cannot be read is never sent. The bar says why (`unclosed “{” at position 8`)
+and the API rejects it with a 400 rather than quietly returning an unfiltered tree. That
+error is the *only* thing the bar says under the box: a permanent status line reporting
+what a 156-pattern brace tree expands to is a paragraph nobody asked for, on every
+keystroke. The syntax card behind `?` is where the notation is explained.
+
 #### A folder that still holds a whole library
 
 The case that prompted this: a folder full of films that is no longer anybody's root
@@ -272,8 +387,12 @@ children that need attention:
 ```
 
 The summary row states one thing at a time. During a search it says what the search
-matched - `1 of 9 folders here match "onepiece"` - and drops the state counts, because
-those describe entries that are not on screen. An instance filter does the same.
+matched - `1 of 9 folders here match the filter`, or `8 of 9 folders here are left by the
+filter` when it is negated - and drops the state counts, because those describe entries
+that are not on screen. An instance filter does the same, naming the instances.
+
+It does not repeat the filter itself. The box is directly above the table, and a brace tree
+that expands to 156 patterns is 400 characters of it on every summary row.
 
 The counts are exact even though the rows are a subset, because they come from one
 `readdir` plus an in-memory index rather than from the rows returned. The rule that makes
@@ -301,12 +420,25 @@ need the fleet's whole library to compute it.
 
 Row actions are derived from the folder itself: `remove`, `re-map` and `align` from its
 owners, `add root folder` from whether any reachable instance could take one here, and
-`new folder`, `rename`, `move`, `prune` from what is on disk. A mount is never renameable,
-and a prune is only offered when nothing anywhere would lose media by it.
+`rename`, `move`, `prune` from what is on disk. A mount is never renameable, and a prune is
+only offered when nothing anywhere would lose media by it.
+
+**Creating folders is not a row action.** It was one, and it made the job it exists for -
+laying out a library - a dozen trips through the same dialog. **New folder(s)…** in the
+toolbar takes the syntax `mkdir -p` takes, expanded by the very same code the filter box
+uses (`expandBraces`), so `{movies,series}/{russian,western}/4k` is six folders described
+once. The dialog previews every path it would create, preflights the first 40 of them, and
+stages one `fs.mkdir` per folder; a selected row only decides which directory the box starts
+in - and a selected folder that does *not* exist, a path only *Arr believes in, opens the box
+pre-filled to create exactly it. **Create in** is a combobox over the directories the tree has
+actually read, not a `<datalist>`: a datalist filters its options by what is already in the
+field, and that field opens pre-filled, so the list it offered was reliably empty. Typing a
+path nothing has read yet stays allowed - the preflight is what says whether it is real.
 
 **Which instance is never inferred from the fleet bar.** An action that removes or realigns
-takes its instances from the folder's own owners, and the dialog names each one before
-anything is staged; an action that *adds* a root folder asks, because a folder with no owner
+takes its instances from the folder's own owners - the row's `remove` covers every owner,
+the owner card's covers exactly one - and the dialog names each one before anything is
+staged; an action that *adds* a root folder asks, because a folder with no owner
 has nothing to infer from. That is what lets the bar be a filter without any action silently
 changing meaning.
 

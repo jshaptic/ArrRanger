@@ -14,8 +14,9 @@ import {
   flattenLevels,
   levelKey,
   mediaSummary,
-  needsRollupRow,
-  rollupChips,
+  ownerFacts,
+  ownerHeadline,
+  ownerMedia,
   rootFolderTargets,
   SEVERITY_STYLES,
   TOP_LEVEL,
@@ -51,7 +52,12 @@ function owner(instanceId: number, use: PathUse, overrides: Partial<PathOwner> =
     rootFolderId: use === 'rootFolder' ? instanceId * 10 : null,
     accessible: use === 'rootFolder' ? true : null,
     mediaUnder: use === 'rootFolder' ? 0 : 1,
+    mediaWithFiles: use === 'rootFolder' ? 0 : 1,
     title: use === 'tracked' ? 'A Title' : null,
+    rootFoldersUnder: use === 'containsRoot' ? ['/data/media/movies'] : [],
+    importLists: [],
+    freeSpace: use === 'rootFolder' ? 1_000_000_000 : null,
+    totalSpace: use === 'rootFolder' ? 4_000_000_000 : null,
     ...overrides,
   };
 }
@@ -290,58 +296,6 @@ describe('flattenLeaves', () => {
   });
 });
 
-describe('the big-folder rollup row', () => {
-  /** 812 entries, only the 6 that need attention returned - the whole point. */
-  const library = level('/data/media/movies', [node('/data/media/movies/Orphan (1999)')], {
-    selection: ['problems'],
-    rollup: rollup({ entries: 812, tracked: 806, untracked: 4, missing: 2, mediaUnder: 806 }),
-    matched: 6,
-    truncated: true,
-  });
-
-  const levels = {
-    [TOP_LEVEL]: level(null, [node('/data/media/movies')]),
-    '/data/media/movies': library,
-  };
-
-  it('adds exactly one summary row under the expanded level, not 812 rows', () => {
-    const rows = flattenLevels({ levels, expanded: ['/data/media/movies'], focus: null });
-
-    expect(rows.filter((row) => row.kind === 'node')).toHaveLength(2);
-    const summaries = rows.filter((row) => row.kind === 'rollup');
-    expect(summaries).toHaveLength(1);
-    expect(summaries[0]?.level?.rollup.entries).toBe(812);
-  });
-
-  it('summarises a level whose selector hid rows, even when nothing was truncated', () => {
-    expect(
-      needsRollupRow(level('/x', [], { matched: 4, rollup: rollup({ entries: 812 }) })),
-    ).toBe(true);
-  });
-
-  it('does not summarise a level that is showing everything', () => {
-    expect(needsRollupRow(level('/x', [node('/x/a')]))).toBe(false);
-  });
-
-  it('states the real totals, and omits counts the server never evaluated', () => {
-    const chips = rollupChips(library);
-    expect(chips.map((chip) => [chip.label, chip.count])).toEqual([
-      ['tracked', 806],
-      ['untracked', 4],
-      ['missing', 2],
-    ]);
-    // empty/unreadable are null here: not checked. Rendering them as 0 would be a lie.
-    expect(chips.some((chip) => chip.label === 'empty')).toBe(false);
-  });
-
-  it('shows evaluated zero-free counts once the server resolved them', () => {
-    const probed = level('/x', [], {
-      rollup: rollup({ entries: 10, tracked: 8, empty: 2, unreadable: 0 }),
-    });
-    expect(rollupChips(probed).map((chip) => chip.label)).toEqual(['tracked', 'empty']);
-  });
-});
-
 describe('actionsFor', () => {
   const flagged = (path: string, flags: PathFlag[], owners: PathOwner[]): PathNode =>
     node(path, { flags, owners, canAddRootFolder: false });
@@ -384,6 +338,16 @@ describe('actionsFor', () => {
     expect(actionsFor(tracked)).not.toContain('prune');
   });
 
+  it('never prunes the parent of a root folder, even one with nothing in it yet', () => {
+    // No media anywhere below, so the media-only rule called this safe to delete - and it
+    // would have taken a configured root folder with it.
+    const target = node('/data/media', {
+      owners: [owner(1, 'containsRoot', { mediaUnder: 0, rootFoldersUnder: ['/data/media/tv'] })],
+    });
+
+    expect(actionsFor(target)).not.toContain('prune');
+  });
+
   it('prunes a folder no owner holds media under - an unreachable instance is not an owner', () => {
     // The old check was `cells.every(c => !c.known || c.mediaUnder === 0)`. An instance
     // that did not answer is absent from `owners` entirely, so it reaches the same answer.
@@ -406,10 +370,12 @@ describe('actionsFor', () => {
     expect(actions).not.toContain('rename');
     expect(actions).not.toContain('move');
     expect(actions).not.toContain('prune');
-    expect(actions).toContain('mkdir');
   });
 
-  it('offers creating the folder for a path only *Arr believes in', () => {
+  // Creating folders left the row entirely - it is one toolbar button taking mkdir syntax,
+  // see `planNewFolders`. A path only *Arr believes in has nothing on disk to act on, so
+  // what is left is the align that would re-point the instance tracking it.
+  it('offers no disk action on a path only *Arr believes in', () => {
     const missing = node('/data/media/movies/Gone (2001)', {
       exists: false,
       origin: 'arr',
@@ -418,8 +384,7 @@ describe('actionsFor', () => {
       canAddRootFolder: false,
     });
 
-    expect(actionsFor(missing)).toContain('mkdir');
-    expect(actionsFor(missing)).not.toContain('prune');
+    expect(actionsFor(missing)).toEqual(['reconcile']);
   });
 
   it('offers only removal for a root folder this container cannot see', () => {
@@ -530,5 +495,107 @@ describe('levelKey', () => {
   it('maps the synthetic top level to a stable key', () => {
     expect(levelKey(null)).toBe(TOP_LEVEL);
     expect(levelKey('/data')).toBe('/data');
+  });
+});
+
+describe('the owner card', () => {
+  it('names the claim, and counts the one that begs a number', () => {
+    expect(ownerHeadline(owner(1, 'rootFolder'))).toBe('root folder here');
+    expect(ownerHeadline(owner(1, 'rootFolder', { accessible: false }))).toContain('cannot see it');
+    expect(ownerHeadline(owner(1, 'tracked'))).toContain('A Title');
+    expect(ownerHeadline(owner(1, 'ancestor'))).toBe('holds media below this folder');
+    expect(
+      ownerHeadline(owner(1, 'containsRoot', { rootFoldersUnder: ['/a/x', '/a/y'] })),
+    ).toBe('2 root folders below this one');
+  });
+
+  it('puts one number on the chip: this instance share of the folder, zero included', () => {
+    expect(ownerMedia(owner(1, 'ancestor', { mediaUnder: 806 })).value).toBe(806);
+
+    // A bare chip could not tell "tracks nothing here" from "we did not count".
+    const empty = ownerMedia(owner(1, 'containsRoot', { mediaUnder: 0 }));
+    expect(empty.value).toBe(0);
+    expect(empty.title).toContain('nothing tracked');
+  });
+
+  it('separates what is tracked from what is on disk', () => {
+    const facts = ownerFacts(
+      owner(1, 'rootFolder', { mediaUnder: 812, mediaWithFiles: 806 }),
+      '/data/media/movies',
+    );
+    const media = facts.find((fact) => fact.label === 'Media');
+
+    expect(media?.value).toBe('812 items at or under here');
+    expect(media?.detail).toEqual(['806 on disk', '6 monitored, not downloaded']);
+  });
+
+  it('leaves root folders below to the headline, which already counts them', () => {
+    const target = owner(1, 'containsRoot', { rootFoldersUnder: ['/data/media/tv'] });
+
+    expect(ownerHeadline(target)).toBe('1 root folder below this one');
+    // Stating it twice in one card is duplication, not emphasis.
+    expect(ownerFacts(target, '/data/media').map((fact) => fact.label)).toEqual([
+      'Media',
+      'Import lists',
+    ]);
+  });
+
+  it('names every list, and says where the ones aimed below land', () => {
+    const facts = ownerFacts(
+      owner(1, 'containsRoot', {
+        rootFoldersUnder: ['/data/media/tv'],
+        importLists: [
+          { id: 1, name: 'Trakt watchlist', enabled: true, automatic: true, path: '/data/media' },
+          { id: 2, name: 'Series watchlist', enabled: true, automatic: false, path: '/data/media/tv' },
+          { id: 3, name: 'Stalled', enabled: false, automatic: false, path: '/data/media/tv' },
+        ],
+      }),
+      '/data/media',
+    );
+    const lists = facts.find((fact) => fact.label === 'Import lists');
+
+    expect(lists?.value).toBe('1 list adds here, 2 below');
+    expect(lists?.detail).toEqual([
+      'Trakt watchlist - adds automatically',
+      // Prefixed with the folder it fills, said relative to the one being read.
+      'tv: Series watchlist - manual add',
+      'tv: Stalled - disabled',
+    ]);
+  });
+
+  it('states the import lists even when there are none, and flags an orphaned one', () => {
+    const quiet = ownerFacts(owner(1, 'rootFolder'), '/data/media/movies');
+    expect(quiet.find((fact) => fact.label === 'Import lists')).toMatchObject({
+      value: 'none point here',
+      tone: 'muted',
+    });
+
+    // A list filling a folder its own instance does not root at is a question, not a fact.
+    const orphan = ownerFacts(
+      owner(1, 'importList', {
+        mediaUnder: 0,
+        importLists: [
+          { id: 2, name: 'Stalled', enabled: false, automatic: false, path: '/data/inbox' },
+        ],
+      }),
+      '/data/inbox',
+    );
+    expect(orphan.find((fact) => fact.label === 'Import lists')).toMatchObject({
+      value: '1 list adds here',
+      detail: ['Stalled - disabled'],
+      tone: 'warn',
+    });
+  });
+
+  it('reports the free space the instance sees, which is not this container statfs', () => {
+    const facts = ownerFacts(owner(1, 'rootFolder'), '/data/media/movies');
+    const root = facts.find((fact) => fact.label === 'Root folder');
+
+    expect(root?.value).toBe('here');
+    expect(root?.detail[0]).toContain('as this instance sees it');
+    // A folder nobody roots at has no root folder fact at all.
+    expect(ownerFacts(owner(1, 'ancestor'), '/data/media').some((f) => f.label === 'Root folder')).toBe(
+      false,
+    );
   });
 });

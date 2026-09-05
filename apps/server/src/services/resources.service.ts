@@ -162,6 +162,10 @@ export class ResourcesService {
     return this.peek(instanceId, 'rootFolder', (raw) => arrRootFolderSchema.parse(raw));
   }
 
+  peekImportLists(instanceId: number): readonly ArrImportList[] | null {
+    return this.peek(instanceId, 'importList', (raw) => arrImportListSchema.parse(raw));
+  }
+
   private peek<T>(
     instanceId: number,
     resource: SnapshotResource,
@@ -182,6 +186,19 @@ export class ResourcesService {
       (raw) => arrRootFolderSchema.parse(raw),
     );
     return folders.payload;
+  }
+
+  /** Cached import lists only - the path index reads these to say what fills a folder. */
+  async importLists(instanceId: number, refresh = false): Promise<readonly ArrImportList[]> {
+    const instance = this.deps.instances.requireWithKey(instanceId);
+    const lists = await this.cached<ArrImportList>(
+      instance,
+      'importList',
+      refresh,
+      async (client) => (await client.listImportLists()).map((entry) => entry.raw),
+      (raw) => arrImportListSchema.parse(raw),
+    );
+    return lists.payload;
   }
 
   invalidate(instanceId: number): void {

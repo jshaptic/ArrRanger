@@ -1,4 +1,4 @@
-import type { ArrRootFolder, InstanceKind } from '@arrranger/shared';
+import type { ArrImportList, ArrRootFolder, InstanceKind, PathImportList } from '@arrranger/shared';
 import type { InstancesRepository } from '../repositories/instances.repo.js';
 import type { ResourcesService } from './resources.service.js';
 
@@ -36,6 +36,16 @@ export interface InstancePathIndex {
   readonly mediaWithFiles: ReadonlySet<string>;
   /** Path -> media items at or under it. Every ancestor of every media path is a key. */
   readonly mediaUnder: ReadonlyMap<string, number>;
+  /** The same closure over `mediaWithFiles` only - what is actually on disk below a path. */
+  readonly mediaWithFilesUnder: ReadonlyMap<string, number>;
+  /**
+   * Every configured import list, each carrying the folder it adds to.
+   *
+   * A flat list rather than a path index: the question asked of it is "what adds at or
+   * under this folder", which is a prefix scan over a handful of rows, and answering it
+   * from a map would mean walking the map anyway.
+   */
+  readonly importLists: readonly PathImportList[];
   /** Parent -> child paths this instance believes in - media paths and root folders. */
   readonly childrenByParent: ReadonlyMap<string, ReadonlySet<string>>;
   /** Sorted, for the inside/outside test. */
@@ -156,21 +166,31 @@ export class PathIndexService {
       if (options.cacheOnly === true) {
         const media = this.deps.resources.peekMediaLibrary(instance.id);
         const rootFolders = this.deps.resources.peekRootFolders(instance.id);
-        // A cache miss contributes nothing rather than becoming a request.
+        // A cache miss contributes nothing rather than becoming a request. Import lists
+        // are the exception: no guard reads them, so a miss there costs a card some
+        // detail rather than making the whole instance uncheckable.
         if (media === null || rootFolders === null) continue;
         indexes.push(
-          buildIndex(instance, rootFolders, media, { reachable: true, error: null, fetchedAt: null }),
+          buildIndex(instance, rootFolders, media, this.deps.resources.peekImportLists(instance.id) ?? [], {
+            reachable: true,
+            error: null,
+            fetchedAt: null,
+          }),
         );
         continue;
       }
 
       try {
-        const [library, rootFolders] = await Promise.all([
+        // Three cached reads, not two. Import lists are a handful of rows behind the same
+        // snapshot cache as the root folders, and they answer the question a root folder
+        // alone cannot: what keeps putting media in this folder.
+        const [library, rootFolders, importLists] = await Promise.all([
           this.deps.resources.mediaLibrary(instance.id, options.refresh === true),
           this.deps.resources.rootFolders(instance.id, options.refresh === true),
+          this.deps.resources.importLists(instance.id, options.refresh === true),
         ]);
         indexes.push(
-          buildIndex(instance, rootFolders, library.items, {
+          buildIndex(instance, rootFolders, library.items, importLists, {
             reachable: true,
             error: null,
             fetchedAt: library.fetchedAt,
@@ -180,7 +200,7 @@ export class PathIndexService {
         // Unreachable is *unknown*, never "missing": the instance still gets a column,
         // and it contributes to no rollup, total or flag.
         indexes.push(
-          buildIndex(instance, [], [], {
+          buildIndex(instance, [], [], [], {
             reachable: false,
             error: caught instanceof Error ? caught.message : 'Instance did not answer',
             fetchedAt: null,
@@ -197,12 +217,15 @@ function buildIndex(
   instance: { id: number; name: string; kind: InstanceKind },
   rootFolders: readonly ArrRootFolder[],
   media: readonly { path: string; title: string; hasFile?: boolean; sizeOnDisk?: number }[],
+  importLists: readonly ArrImportList[],
   status: { reachable: boolean; error: string | null; fetchedAt: string | null },
 ): InstancePathIndex {
   const rootFolderMap = new Map<string, ArrRootFolder>();
   const mediaAt = new Map<string, string>();
   const mediaWithFiles = new Set<string>();
   const mediaUnder = new Map<string, number>();
+  const mediaWithFilesUnder = new Map<string, number>();
+  const importListEntries: PathImportList[] = [];
   const childrenByParent = new Map<string, Set<string>>();
 
   const remember = (child: string): void => {
@@ -220,18 +243,38 @@ function buildIndex(
     remember(normalised);
   }
 
+  // *Arr stores an import list's target as a plain string, and an unconfigured list
+  // carries an empty one - which must never normalise into a claim on `/`.
+  for (const list of importLists) {
+    if (list.rootFolderPath.length === 0) continue;
+    const normalised = normalisePath(list.rootFolderPath);
+    importListEntries.push({
+      id: list.id,
+      name: list.name,
+      enabled: list.enabled,
+      // Radarr and Sonarr spell the same switch differently; either one being on means
+      // the list adds media on its own.
+      automatic: (list.enableAuto ?? false) || (list.enableAutomaticAdd ?? false),
+      path: normalised,
+    });
+  }
+
   for (const item of media) {
     if (item.path.length === 0) continue;
     const normalised = normalisePath(item.path);
     mediaAt.set(normalised, item.title);
-    if (item.hasFile ?? (item.sizeOnDisk ?? 0) > 0) mediaWithFiles.add(normalised);
+    const hasFile = item.hasFile ?? (item.sizeOnDisk ?? 0) > 0;
+    if (hasFile) mediaWithFiles.add(normalised);
     remember(normalised);
 
     // The ancestor closure. One walk per media path credits the folder itself and every
-    // directory above it, which is what makes rollups correct at any depth.
+    // directory above it, which is what makes rollups correct at any depth. The
+    // with-files closure rides along in the same walk: a second pass would double the
+    // cost of the only loop in this file that scales with library size.
     let current: string | null = normalised;
     for (let depth = 0; current !== null && depth < MAX_ANCESTOR_DEPTH; depth += 1) {
       mediaUnder.set(current, (mediaUnder.get(current) ?? 0) + 1);
+      if (hasFile) mediaWithFilesUnder.set(current, (mediaWithFilesUnder.get(current) ?? 0) + 1);
       current = parentPath(current);
     }
   }
@@ -247,6 +290,11 @@ function buildIndex(
     mediaAt,
     mediaWithFiles,
     mediaUnder,
+    mediaWithFilesUnder,
+    // Shallowest target first, so a card lists what lands here before what lands below.
+    importLists: importListEntries.sort(
+      (a, b) => a.path.length - b.path.length || a.path.localeCompare(b.path) || a.name.localeCompare(b.name),
+    ),
     childrenByParent,
     rootFolderPrefixes: [...rootFolderMap.keys()].sort(),
   };
