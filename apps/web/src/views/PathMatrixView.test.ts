@@ -1026,6 +1026,84 @@ describe('PathMatrixView', () => {
     wrapper.unmount();
   });
 
+  // ------------------------------------------------------------------- selection
+
+  /**
+   * A folder the tree renders children under is a place to look, not a thing to act on -
+   * every batch action the toolbar offers is about the folder itself. The spine arrives
+   * with /data and /data/media already open, so they are the two known parents; everything
+   * below them is a leaf until a level says otherwise.
+   */
+  it('offers a checkbox on leaf folders only', async () => {
+    const wrapper = await mountView();
+
+    expect(rowAt(wrapper, '/data').find('input[type="checkbox"]').exists()).toBe(false);
+    expect(rowAt(wrapper, '/data/media').find('input[type="checkbox"]').exists()).toBe(false);
+
+    for (const path of ['/data/media/movies', '/data/media/tv', '/data/media/spare', '/elsewhere/movies']) {
+      expect(rowAt(wrapper, path).find('input[type="checkbox"]').exists()).toBe(true);
+    }
+  });
+
+  it('selects exactly the rows in the table, and clears everything', async () => {
+    const wrapper = await mountView();
+
+    const selectable = wrapper.findAll('tbody input[type="checkbox"]');
+    expect(selectable).toHaveLength(5);
+
+    await wrapper.find('[data-testid="select-all"]').trigger('change');
+    await flushPromises();
+    expect(wrapper.text()).toContain('5 row(s) selected');
+
+    // Deselect-all is the same checkbox, not a second control.
+    await wrapper.find('[data-testid="select-all"]').trigger('change');
+    await flushPromises();
+    expect(wrapper.find('[data-testid="clear-selection"]').exists()).toBe(false);
+
+    await wrapper.find('[data-testid="select-all"]').trigger('change');
+    await flushPromises();
+    await wrapper.find('[data-testid="clear-selection"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('[data-testid="clear-selection"]').exists()).toBe(false);
+  });
+
+  /** "All" is what is in view - so narrowing the tree narrows what the header takes. */
+  it('takes only the filtered rows once the fleet bar narrows the tree', async () => {
+    const wrapper = await mountView();
+
+    const chip = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('Radarr-4K'));
+    await chip?.trigger('click');
+    for (let tick = 0; tick < 6; tick += 1) await flushPromises();
+
+    await wrapper.find('[data-testid="select-all"]').trigger('change');
+    await flushPromises();
+
+    // /data and /data/media are parents; movies, old-movies and /elsewhere/movies are not.
+    expect(wrapper.text()).toContain('3 row(s) selected');
+  });
+
+  /**
+   * Expanding a folder is the moment the tree learns it is a parent. Its checkbox goes,
+   * and so does its place in the selection - a selected row with no checkbox would be a
+   * count nobody could undo.
+   */
+  it('drops a selected folder that turns out to have subfolders', async () => {
+    const wrapper = await mountView();
+
+    await rowAt(wrapper, '/data/media/old-movies').find('input[type="checkbox"]').trigger('change');
+    await flushPromises();
+    expect(wrapper.text()).toContain('1 row(s) selected');
+
+    const twisty = rowAt(wrapper, '/data/media/old-movies').findAll('button')[0];
+    await twisty?.trigger('click');
+    for (let tick = 0; tick < 6; tick += 1) await flushPromises();
+
+    expect(rowAt(wrapper, '/data/media/old-movies').find('input[type="checkbox"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="clear-selection"]').exists()).toBe(false);
+  });
+
   // ---------------------------------------------------------------- teaching state
 
   it('explains exactly what to configure when the filesystem is off', async () => {

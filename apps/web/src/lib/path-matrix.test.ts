@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import {
   actionsFor,
   flattenLeaves,
+  isLeafFolder,
   flattenLevels,
   levelKey,
   mediaSummary,
@@ -202,6 +203,38 @@ describe('flattenLevels', () => {
     const rows = flattenLevels({ levels: withAFile, expanded: ['/data'], focus: null });
 
     expect(rows.map((row) => row.node?.path)).toEqual(['/data', '/data/media']);
+  });
+});
+
+describe('isLeafFolder', () => {
+  const levels = {
+    [TOP_LEVEL]: level(null, [node('/data')]),
+    '/data': level('/data', [node('/data/media'), node('/data/other')]),
+    // A root folder's level: 812 films, not one of them a folder this view manages.
+    '/data/media': level('/data/media', [
+      node('/data/media/Dune (2021).mkv', { kind: 'file', expandable: false }),
+    ]),
+  };
+
+  it('calls a folder with subfolders a parent', () => {
+    expect(isLeafFolder('/data', levels)).toBe(false);
+  });
+
+  it('calls a folder of files a leaf, however many entries it has', () => {
+    expect(isLeafFolder('/data/media', levels)).toBe(true);
+  });
+
+  it('calls an unread folder a leaf - "not fetched" is answered, not guessed at twice', () => {
+    expect(isLeafFolder('/data/other', levels)).toBe(true);
+  });
+
+  /** The tree's checkboxes and the flat list's rows must never disagree about a folder. */
+  it('is the same verdict the flat list picks its rows by', () => {
+    const flat = flattenLeaves({ levels, expanded: [], focus: null }).map((row) => row.node.path);
+    const tree = flattenLevels({ levels, expanded: ['/data', '/data/media'], focus: null });
+
+    expect(tree.filter((row) => row.leaf).map((row) => row.node.path)).toEqual(flat);
+    expect(tree.filter((row) => !row.leaf).map((row) => row.node.path)).toEqual(['/data']);
   });
 });
 

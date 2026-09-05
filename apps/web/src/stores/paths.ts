@@ -152,10 +152,24 @@ export const usePathsStore = defineStore('paths', () => {
 
   const isExpanded = (path: string): boolean => expanded.value.includes(path);
 
+  /**
+   * The node behind a path, from whichever cache the current view is reading.
+   *
+   * The flat list has a cache of its own (`flatLevels`) that deliberately never shares
+   * state with `levels`, and its rows come only from there - so looking in `levels` alone
+   * left every selection made in that view resolving to nothing, and with it every toolbar
+   * action the selection feeds. The active view is asked first; the other is a fallback,
+   * since a path can legitimately sit in both.
+   */
   function nodeAt(path: string): PathNode | null {
-    for (const level of Object.values(levels.value)) {
-      const found = level.nodes.find((node) => node.path === path);
-      if (found !== undefined) return found;
+    const caches = flatView.value
+      ? [flatLevels.value, levels.value]
+      : [levels.value, flatLevels.value];
+    for (const cache of caches) {
+      for (const level of Object.values(cache)) {
+        const found = level.nodes.find((node) => node.path === path);
+        if (found !== undefined) return found;
+      }
     }
     return null;
   }

@@ -20,6 +20,7 @@ import {
   trackedBy,
   unknownColumns,
   type PathAction,
+  type PathRow,
 } from '@/lib/path-matrix';
 import { useMatrixStore } from '@/stores/matrix';
 import { usePathsStore } from '@/stores/paths';
@@ -82,6 +83,66 @@ function toggleSelected(path: string): void {
     ? selected.value.filter((entry) => entry !== path)
     : [...selected.value, path];
 }
+
+/**
+ * What "all" means here: the rows in the table right now.
+ *
+ * Not "every folder on disk", and not even every folder the browser has cached. Levels are
+ * fetched lazily, so a tree-wide claim would either be a lie or an `expandAll()` crawl
+ * hiding behind a checkbox. The rows already are the filtered, focused, expanded answer -
+ * the same "the rows are what they are" the table itself works on - so selecting them is
+ * both honest and exactly what a filter was narrowed down for.
+ *
+ * Only leaves, because only leaves have a checkbox.
+ */
+const selectableRows = computed(() => paths.rows.filter((row) => row.leaf));
+
+const allSelected = computed(
+  () =>
+    selectableRows.value.length > 0 &&
+    selectableRows.value.every((row) => selected.value.includes(row.node.path)),
+);
+
+/** Drives the header checkbox's third state - some of the visible rows, not all. */
+const someSelected = computed(
+  () =>
+    !allSelected.value && selectableRows.value.some((row) => selected.value.includes(row.node.path)),
+);
+
+/**
+ * Select-all adds the visible rows; deselect-all removes exactly those again, leaving any
+ * selection made elsewhere - inside a branch since collapsed, or before the filter was
+ * narrowed - alone. `Clear` beside the count is the one that drops everything, which is
+ * why the count is a button.
+ */
+function toggleAll(): void {
+  const visible = selectableRows.value.map((row) => row.node.path);
+  selected.value = allSelected.value
+    ? selected.value.filter((path) => !visible.includes(path))
+    : [...new Set([...selected.value, ...visible])];
+}
+
+function clearSelection(): void {
+  selected.value = [];
+}
+
+/**
+ * Expanding a folder is the moment the tree learns it is a parent, and a parent is not a
+ * selection target - so anything now rendered without a checkbox leaves the selection.
+ *
+ * Deliberately only that: a row that merely left the table (collapsed away, filtered out)
+ * keeps its selection, or narrowing a filter to review one branch would silently discard
+ * everything picked before it.
+ */
+watch(
+  () => paths.rows,
+  (rows: PathRow[]) => {
+    const parents = new Set(rows.filter((row) => !row.leaf).map((row) => row.node.path));
+    if (parents.size === 0) return;
+    const next = selected.value.filter((path) => !parents.has(path));
+    if (next.length !== selected.value.length) selected.value = next;
+  },
+);
 
 function instanceName(instanceId: number): string {
   return (
@@ -343,9 +404,16 @@ environment:
           scanned {{ formatRelativeTime(paths.scannedAt) }}
         </span>
 
-        <span v-if="selected.length > 0" class="text-xs text-staged">
-          {{ selected.length }} row(s) selected
-        </span>
+        <button
+          v-if="selected.length > 0"
+          type="button"
+          class="text-xs text-staged transition-colors hover:text-ink"
+          data-testid="clear-selection"
+          title="Clear the whole selection, including folders no longer in view"
+          @click="clearSelection()"
+        >
+          {{ selected.length }} row(s) selected - clear
+        </button>
 
         <div class="ml-auto flex flex-wrap items-center gap-2">
           <BaseButton size="sm" :loading="paths.loading" @click="rescan">
@@ -474,9 +542,31 @@ environment:
                 <th
                   scope="col"
                   class="sticky left-0 z-20 min-w-[24rem] border-b border-line bg-raised px-3 py-2 text-left text-[11px] font-semibold text-muted"
-                  title="A root folder is green. What is wrong with a folder is stated at the right of this column, next to the name it describes"
                 >
-                  Path
+                  <span class="flex items-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      class="accent-[var(--color-accent)] disabled:opacity-30"
+                      data-testid="select-all"
+                      :checked="allSelected"
+                      :indeterminate="someSelected"
+                      :disabled="selectableRows.length === 0"
+                      :aria-label="allSelected ? 'Deselect every row in the table' : 'Select every row in the table'"
+                      :title="
+                        selectableRows.length === 0
+                          ? 'No selectable folder in the table - only leaf folders can be selected'
+                          : allSelected
+                            ? `Deselect the ${selectableRows.length} row(s) in the table`
+                            : `Select the ${selectableRows.length} row(s) in the table - exactly what is in view, filter and all`
+                      "
+                      @change="toggleAll()"
+                    />
+                    <span
+                      title="A root folder is green. What is wrong with a folder is stated at the right of this column, next to the name it describes"
+                    >
+                      Path
+                    </span>
+                  </span>
                 </th>
                 <th
                   class="border-b border-l border-line bg-raised px-2 py-2 text-left text-[11px] font-semibold text-muted"
@@ -518,6 +608,7 @@ environment:
                 :child-severity="row.childSeverity"
                 :busy="queue.busy"
                 :loading="paths.isLoadingPath(row.node.path)"
+                :selectable="row.leaf"
                 :selected="selected.includes(row.node.path)"
                 :measured="paths.measurements[row.node.path]?.sizeOnDisk ?? null"
                 :measuring="paths.measuring[row.node.path] === true"
@@ -536,7 +627,9 @@ environment:
 
       <p class="text-[11px] leading-relaxed text-muted">
         Folders are managed here in their own right - this view does not compare a folder
-        across instances, because a folder normally belongs to one. Disk operations are staged
+        across instances, because a folder normally belongs to one. Only leaf folders can be
+        selected: a folder with subfolders under it is a place to look, not a thing to act
+        on, and the header checkbox takes exactly the rows in view. Disk operations are staged
         like any other change: they land in Pending Fleet Changes, run in order with the *Arr
         steps, and their preflight runs again immediately before execution. Symlinks are shown
         but never followed or modified.

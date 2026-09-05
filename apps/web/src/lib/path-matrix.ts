@@ -38,6 +38,8 @@ export interface PathRow {
    * is exactly "what is in this directory", and the store already indexes levels by path.
    */
   readonly childSeverity: PathSeverity | null;
+  /** {@link isLeafFolder} for this node - what decides whether the row is selectable. */
+  readonly leaf: boolean;
 }
 
 export interface FlattenInput {
@@ -60,6 +62,27 @@ export const TOP_LEVEL = '';
 
 export function levelKey(path: string | null): string {
   return path ?? TOP_LEVEL;
+}
+
+/**
+ * A folder the tree will never render children under.
+ *
+ * Decided from the fetched level, never from `expandable`: a root folder holding 812 films
+ * has entries but is deliberately never read below (the server's `expandableOf`), and a
+ * folder of 172 episode files is the deepest folder on its branch. A folder whose level was
+ * never fetched counts as a leaf - the flat list crawls everything before it asks, and in
+ * the tree that is the honest answer until the level is read.
+ *
+ * One definition, shared: it picks the flat list's rows and the tree's checkboxes, so the
+ * same folders are selectable in both views and expanding a folder is the moment the tree
+ * learns it is a parent.
+ */
+export function isLeafFolder(
+  path: string,
+  levels: Readonly<Record<string, PathMatrixLevel>>,
+): boolean {
+  const level = levels[path];
+  return level === undefined || !level.nodes.some((child) => child.kind === 'directory');
 }
 
 /**
@@ -100,6 +123,7 @@ export function flattenLevels(input: FlattenInput): PathRow[] {
         expanded: isExpanded,
         hasLevel,
         childSeverity: hasLevel ? input.levels[childKey]?.rollup.severity ?? null : null,
+        leaf: isLeafFolder(childKey, input.levels),
       });
 
       if (isExpanded) walk(childKey, depth + 1);
@@ -118,11 +142,9 @@ export function flattenLevels(input: FlattenInput): PathRow[] {
  *
  * A leaf is a folder with no *sub*folders - which is not the same thing as a folder with
  * no children. A folder holding 172 episode files and nothing else is the deepest folder
- * on that branch, and is exactly what this list is for; the server calls it `expandable`
- * (it has entries), so leaf-ness is decided from its fetched level - does it contain a
- * directory? - and never from `expandable` alone. A folder whose level was never fetched
- * is treated as a leaf too: the caller is expected to have crawled everything first (see
- * `loadFlatView`), so that is a defensive fallback, not the normal path.
+ * on that branch, and is exactly what this list is for. {@link isLeafFolder} is the whole
+ * of that judgement, and it expects the caller to have crawled everything first (see
+ * `loadFlatView`) - its unfetched-is-a-leaf fallback is defensive here, not the normal path.
  *
  * Anything that is not a directory - a file, a symlink - is dropped outright: this is a
  * folder list, and a level legitimately mixes directory and file candidates together.
@@ -146,10 +168,9 @@ export function flattenLeaves(input: FlattenInput): PathRow[] {
       if (node.kind !== 'directory') continue;
 
       const childKey = node.path;
-      const childLevel = input.levels[childKey];
-      const hasLevel = childLevel !== undefined;
+      const hasLevel = input.levels[childKey] !== undefined;
 
-      if (childLevel?.nodes.some((child) => child.kind === 'directory') === true) {
+      if (!isLeafFolder(childKey, input.levels)) {
         walk(childKey);
         continue;
       }
@@ -164,6 +185,7 @@ export function flattenLeaves(input: FlattenInput): PathRow[] {
         expanded: false,
         hasLevel,
         childSeverity: null,
+        leaf: true,
       });
     }
   };

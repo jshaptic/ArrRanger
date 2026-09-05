@@ -35,6 +35,15 @@ const props = defineProps<{
   childSeverity: PathSeverity | null;
   busy: boolean;
   loading: boolean;
+  /**
+   * Whether this row can be selected at all - a leaf folder, in either view.
+   *
+   * A folder the tree renders children under is not a selection target: every batch action
+   * the toolbar offers is about the folder itself (root folders live on leaves, and a
+   * prune or a rename is per folder), so a parent's checkbox would only ever mean "and not
+   * the four rows indented under it", which is not a thing anyone wants to say.
+   */
+  selectable: boolean;
   selected: boolean;
   measured: number | null;
   measuring: boolean;
@@ -186,12 +195,21 @@ const spaceTitle = computed(() => {
     >
       <div class="flex items-center gap-1.5" :style="{ paddingLeft: `${String(depth * 0.9)}rem` }">
         <input
+          v-if="selectable"
           type="checkbox"
           class="accent-[var(--color-accent)]"
           :checked="selected"
           :title="`Select ${node.path}`"
           @change="emit('select')"
         />
+        <!-- Alignment only: a parent has no checkbox, but its name still has to line up
+             with its children's. -->
+        <span
+          v-else
+          class="w-3 shrink-0"
+          title="This folder holds subfolders - select those instead"
+          data-testid="no-checkbox"
+        ></span>
 
         <template v-if="!flat">
           <button
