@@ -338,9 +338,10 @@ describe('actionsFor', () => {
       owner(1, 'rootFolder', { mediaUnder: 806 }),
     ]);
 
-    expect(actionsFor(target)).toEqual(
-      expect.arrayContaining(['remove', 'remap', 'rename']),
-    );
+    expect(actionsFor(target)).toEqual(expect.arrayContaining(['remap', 'rename']));
+    // Removal is per instance, so it is the owner card's button, never a row button
+    // standing for every owner at once.
+    expect(actionsFor(target)).not.toContain('remove');
   });
 
   it('offers the disk actions on a folder nobody roots', () => {
@@ -348,7 +349,6 @@ describe('actionsFor', () => {
     const actions = actionsFor(target);
 
     expect(actions).toEqual(expect.arrayContaining(['addRoot', 'rename', 'move', 'prune']));
-    expect(actions).not.toContain('remove');
     expect(actions).not.toContain('remap');
   });
 
@@ -422,7 +422,7 @@ describe('actionsFor', () => {
     expect(actionsFor(missing)).toEqual([]);
   });
 
-  it('offers only removal for a root folder this container cannot see', () => {
+  it('offers no row action for a root folder this container cannot see', () => {
     const unseen = node('/elsewhere/movies', {
       exists: false,
       inScope: false,
@@ -432,7 +432,9 @@ describe('actionsFor', () => {
       canAddRootFolder: false,
     });
 
-    expect(actionsFor(unseen)).toEqual(['remove']);
+    // There is nothing on disk to act on, and removing its root folder is the owner
+    // card's job - the chip is still there whether or not the folder is.
+    expect(actionsFor(unseen)).toEqual([]);
   });
 });
 

@@ -158,9 +158,6 @@ function runAction(node: PathNode, action: PathAction): void {
       // marks every instance that has it.
       adding.value = { path: node.path, paths: [], preselect: [] };
       return;
-    case 'remove':
-      removing.value = rootFolderTargets(node);
-      return;
     case 'remap':
       remapping.value = node.path;
       return;

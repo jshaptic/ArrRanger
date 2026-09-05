@@ -457,7 +457,6 @@ export const USE_CLASSES: Record<PathUse, string> = {
 
 export type PathAction =
   | 'addRoot'
-  | 'remove'
   | 'remap'
   | 'rename'
   | 'move'
@@ -471,7 +470,7 @@ export type PathAction =
  * for everything that removes or realigns, and the dialogs ask for everything that adds.
  * That is what lets the fleet bar be a filter rather than a hidden action target.
  *
- * Three things are deliberately absent. Creating a folder was a row action, which meant one
+ * Four things are deliberately absent. Creating a folder was a row action, which meant one
  * dialog per folder for the job that is never singular - laying out
  * `{movies,series}/{russian,western}/4k`. It is one toolbar button now, taking the same
  * brace expansion the filter does, so a row no longer has to be found before a folder that
@@ -481,6 +480,11 @@ export type PathAction =
  * name - and differing only in whether the *Arr half was staged. It is the same dialog now:
  * `rename` offers the instances rooting at the folder as checkboxes, so the choice is made
  * where the name is typed rather than by picking the right button beforehand.
+ *
+ * `remove` was a row button beside them, staging a removal for every instance rooting at
+ * the folder at once. Removal is per instance, and the owner chip already names the one it
+ * is about, so it lives on the owner card - one instance, named, with its media count in
+ * front of you - and the toolbar keeps the batch version for a selection.
  *
  * And renaming an individual *media* folder is offered as a plain disk rename, never as an
  * align chain. `media.moveRootFolder` only sets `rootFolderPath` and `media.refresh`
@@ -493,11 +497,11 @@ export function actionsFor(node: PathNode): PathAction[] {
   const rootFolders = rootFolderOwners(node);
   const actions: PathAction[] = [];
 
-  // Nothing on disk to act on, and no path to browse into.
-  if (flags.has('unseen')) return rootFolders.length > 0 ? ['remove'] : [];
+  // Nothing on disk to act on, and no path to browse into. Its root-folder owners are
+  // still chips, so removing one is still a click away - on the card, where it belongs.
+  if (flags.has('unseen')) return [];
 
   if (node.canAddRootFolder) actions.push('addRoot');
-  if (rootFolders.length > 0) actions.push('remove');
 
   if (flags.has('rootFolder') && rootFolders.some((owner) => owner.mediaUnder > 0)) {
     actions.push('remap');
