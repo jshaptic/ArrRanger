@@ -172,64 +172,6 @@ not "nobody".
 Two instances rooting at one folder is legal and renders as two chips. It is supported, not
 optimised for, and it is deliberately *not* called drift.
 
-**The chip carries one count and the card carries the rest.** That count is this
-instance's share of the folder, which is the one thing the Media column beside it cannot
-be: that column sums the fleet, so a 4K/HD split counts the same films twice there and
-neither number alone answers "how much of this is yours". It is rendered even when it is
-`0`, because a bare chip could not tell "this instance tracks nothing here" from "we did
-not count". Everything else an owner knows is a sentence rather than a number and reads as
-noise squeezed onto a chip, so hovering or clicking opens the owner card:
-
-```
-● Radarr-4K ·812
-┌────────────────────────────────┐
-│ R4  Radarr-4K           radarr │
-│ root folder here               │
-│ ──────────────────────────────  │
-│ MEDIA    812 items at or under │
-│          806 on disk           │
-│          6 monitored, not      │
-│          downloaded            │
-│ ROOT     here                  │
-│ FOLDER   1.2 TB free of 4 TB,  │
-│          as this instance      │
-│          sees it               │
-│ IMPORT   2 lists add here,     │
-│ LISTS    1 below               │
-│          Trakt watchlist -     │
-│          adds automatically    │
-│          Kids picks - disabled │
-│          4k/: Radarr-4K sync - │
-│          manual add            │
-│                [ Remove root ] │
-└────────────────────────────────┘
-```
-
-Three of those facts exist because a chip could not hold them:
-
-- **tracked is not on disk.** `812 items` and `806 on disk` are different numbers, and the
-  gap is the monitored-but-not-downloaded backlog - a fact about the instance, not a
-  folder missing from the disk. The two are never collapsed into one count.
-- **free space is reported twice on purpose.** The `Free` column is this container's
-  `statfs`; the card's line is what *Arr itself reports for its root folder. When they
-  disagree, the instance is looking at a different volume - which is the mapping
-  diagnosis, stated per instance instead of only fleet-wide.
-- **import lists are what keeps refilling a folder.** Pruning or re-pointing a folder an
-  automatic list still targets undoes itself by the next sync, so every list that adds at
-  or under the folder is **named** on the card that offers the removal - the ones aimed
-  deeper prefixed with where they land. "Which list" is the actionable half; a count would
-  say a folder refills itself without saying what to go and turn off.
-
-Root folders below the folder are counted in the headline (`1 root folder below this one`)
-and not listed again underneath it. The count is what decides whether the folder is safe to
-touch; the paths are one expand away in the tree that is already on screen.
-
-Removing a root folder is a **button on the card**, not a bare click on the chip. The old
-behaviour staged a destructive change from an unlabelled click with nothing on screen
-saying so; the card names the instance, the folder and what it holds first. The card is
-teleported and positioned against the viewport rather than the row, because the table is a
-horizontal scroll container and would otherwise clip it.
-
 #### Free space is monitored per filesystem, not per instance
 
 Every row reports the free space of the filesystem it is on, resolved by device id with one
@@ -349,10 +291,19 @@ need the fleet's whole library to compute it.
 
 #### Actions
 
-Row actions are derived from the folder itself: `remove`, `re-map` and `align` from its
-owners, `add root folder` from whether any reachable instance could take one here, and
-`rename`, `move`, `prune` from what is on disk. A mount is never renameable, and a prune is
-only offered when nothing anywhere would lose media by it.
+Row actions are derived from the folder itself: `remove` and `re-map` from its owners,
+`add root folder` from whether any reachable instance could take one here, and `rename`,
+`move`, `prune` from what is on disk. A mount is never renameable, and a prune is only
+offered when nothing anywhere would lose media by it.
+
+**One rename, not a rename and an align.** They were two row actions that asked the same
+first question - the new name - and differed only in whether the *Arr half was staged; a
+rename of a root folder that skipped it left the media missing, so it was never really an
+independent choice, and picking the wrong button was a silent way to break a library. The
+folder's own root-folder owners are checkboxes inside the rename dialog now, ticked by
+default, and the row's label says which rename it is before it is clicked: `rename & align`
+on a root folder, plain `rename` on anything else. Unticking every instance is still the
+disk-only rename, and the dialog says what that would strand.
 
 **Creating folders is not a row action.** It was one, and it made the job it exists for -
 laying out a library - a dozen trips through the same dialog. **New folder(s)…** in the
@@ -376,8 +327,9 @@ changing meaning.
 **Not offered on purpose:** an align chain for renaming an individual *media* folder.
 `media.moveRootFolder` only sets `rootFolderPath`, and `media.refresh` re-reads each item's
 stored path, so nothing in the current operation set can make *Arr adopt a renamed media
-folder - it would report the item missing. The plain disk rename is offered instead, with a
-warning naming the instances and item counts it would leave dangling.
+folder - it would report the item missing. A media folder has no root-folder owners, so the
+rename dialog offers it nothing to follow - just the plain disk rename, with a warning
+naming the instances and item counts it would leave dangling.
 
 ### Import list fleet
 
@@ -464,14 +416,15 @@ here, unlike for the SQLite database, which belongs on the cache disk).
 | Traversal | Every path is resolved against the configured roots; the parent chain is realpath'd, so a symlink cannot be used to escape. A symlink *leaf* is left unresolved, so "move this link" can never silently move the library behind it. |
 | Symlinks | Shown in the folder view, never followed and never mutated. |
 | Deleting | Hard delete, no recycle bin. Non-empty needs `recursive`; a folder a connected instance still tracks needs `force`, and so does one ArrRanger cannot *check* - an unreachable instance is never read as a cleared one; the UI makes you type the folder name. Deleting a storage root or a mount point is refused outright. |
-| Cross-filesystem moves | **Refused.** The preflight compares device ids and reports how much would have to be copied: move it with your own tool (unBALANCE, rsync), then use Reconcile &amp; Align. |
+| Cross-filesystem moves | **Refused.** The preflight compares device ids and reports how much would have to be copied: move it with your own tool (unBALANCE, rsync), then re-map the instances onto it. |
 | Preflight | Runs before staging *and* again immediately before execution, so a staged operation that went stale fails with `fs_precondition_failed` instead of acting on a filesystem nobody reviewed. |
 
-### Reconcile &amp; Align
+### Rename &amp; align
 
-The headline workflow, reached from the `align` action on any row in the folder view that
-an instance points at. Pick a tracked folder, give it a new name, choose which instances to
-realign, and ArrRanger stages one dependent chain:
+The headline workflow, and the reason renaming is one action rather than two: it is the
+`rename` dialog on any folder an instance roots at, where the owning instances are listed
+as checkboxes. Give the folder a new name, leave the instances ticked, and ArrRanger stages
+one dependent chain:
 
 ```
 1. fs.rename /data/movies -> /data/films                    (host, no instance)
@@ -484,6 +437,11 @@ realign, and ArrRanger stages one dependent chain:
 If the disk step fails, every step behind it is skipped and the run halts - verified in a
 container: with the volume read-only, the rename failed with `fs_permission_denied` and
 **zero *Arr requests were made**.
+
+An instance that roots here but has downloaded nothing yet skips steps 3 and 4 - there are
+no ids to bulk-edit, and an editor call with an empty list is a request *Arr has no reason
+to accept - but it still gets steps 2 and 5, because a root folder is configuration and
+being empty is not a reason to leave it pointing at a path that no longer exists.
 
 ## The queue engine
 

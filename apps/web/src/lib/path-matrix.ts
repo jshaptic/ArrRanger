@@ -437,7 +437,6 @@ export type PathAction =
   | 'addRoot'
   | 'remove'
   | 'remap'
-  | 'reconcile'
   | 'rename'
   | 'move'
   | 'prune'
@@ -450,11 +449,16 @@ export type PathAction =
  * for everything that removes or realigns, and the dialogs ask for everything that adds.
  * That is what lets the fleet bar be a filter rather than a hidden action target.
  *
- * Two things are deliberately absent. Creating a folder was a row action, which meant one
+ * Three things are deliberately absent. Creating a folder was a row action, which meant one
  * dialog per folder for the job that is never singular - laying out
  * `{movies,series}/{russian,western}/4k`. It is one toolbar button now, taking the same
  * brace expansion the filter does, so a row no longer has to be found before a folder that
  * does not exist yet can be named.
+ *
+ * `align` was a second row action beside `rename`, asking the same first question - the new
+ * name - and differing only in whether the *Arr half was staged. It is the same dialog now:
+ * `rename` offers the instances rooting at the folder as checkboxes, so the choice is made
+ * where the name is typed rather than by picking the right button beforehand.
  *
  * And renaming an individual *media* folder is offered as a plain disk rename, never as an
  * align chain. `media.moveRootFolder` only sets `rootFolderPath` and `media.refresh`
@@ -473,11 +477,8 @@ export function actionsFor(node: PathNode): PathAction[] {
   if (node.canAddRootFolder) actions.push('addRoot');
   if (rootFolders.length > 0) actions.push('remove');
 
-  if (flags.has('rootFolder')) {
-    if (rootFolders.some((owner) => owner.mediaUnder > 0)) actions.push('remap');
-    actions.push('reconcile');
-  } else if (node.owners.some((owner) => owner.use === 'tracked')) {
-    actions.push('reconcile');
+  if (flags.has('rootFolder') && rootFolders.some((owner) => owner.mediaUnder > 0)) {
+    actions.push('remap');
   }
 
   if (flags.has('missing')) return actions;

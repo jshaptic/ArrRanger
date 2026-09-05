@@ -306,7 +306,7 @@ describe('actionsFor', () => {
     ]);
 
     expect(actionsFor(target)).toEqual(
-      expect.arrayContaining(['remove', 'remap', 'reconcile']),
+      expect.arrayContaining(['remove', 'remap', 'rename']),
     );
   });
 
@@ -354,11 +354,13 @@ describe('actionsFor', () => {
     expect(actionsFor(node('/data/media/spare', { owners: [] }))).toContain('prune');
   });
 
-  it('offers align on a tracked media folder, but not a re-map', () => {
+  // Align is not a second row action any more: renaming a root folder offers the instances
+  // rooting at it inside the one dialog. A media folder has none, so it gets a plain rename
+  // - which is exactly what it could ever have had.
+  it('offers a plain rename on a tracked media folder, and no re-map', () => {
     const target = flagged('/data/media/movies/Dune (2021)', [], [owner(1, 'tracked')]);
     const actions = actionsFor(target);
 
-    expect(actions).toContain('reconcile');
     expect(actions).toContain('rename');
     expect(actions).not.toContain('remap');
   });
@@ -373,9 +375,9 @@ describe('actionsFor', () => {
   });
 
   // Creating folders left the row entirely - it is one toolbar button taking mkdir syntax,
-  // see `planNewFolders`. A path only *Arr believes in has nothing on disk to act on, so
-  // what is left is the align that would re-point the instance tracking it.
-  it('offers no disk action on a path only *Arr believes in', () => {
+  // see `planNewFolders`. A path only *Arr believes in has nothing on disk to act on at
+  // all: it is not a root folder, so there is no re-map, and there is no folder to rename.
+  it('offers no action at all on a path only *Arr believes in', () => {
     const missing = node('/data/media/movies/Gone (2001)', {
       exists: false,
       origin: 'arr',
@@ -384,7 +386,7 @@ describe('actionsFor', () => {
       canAddRootFolder: false,
     });
 
-    expect(actionsFor(missing)).toEqual(['reconcile']);
+    expect(actionsFor(missing)).toEqual([]);
   });
 
   it('offers only removal for a root folder this container cannot see', () => {

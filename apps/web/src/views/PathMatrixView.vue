@@ -11,11 +11,16 @@ import AddPathDialog from '@/components/roots/AddPathDialog.vue';
 import RemapDialog from '@/components/roots/RemapDialog.vue';
 import RemoveRootFoldersDialog from '@/components/roots/RemoveRootFoldersDialog.vue';
 import DiskOperationModal, { type DiskOperation } from '@/components/storage/DiskOperationModal.vue';
-import ReconcileDialog from '@/components/storage/ReconcileDialog.vue';
 import { basename, breadcrumbs, parentOf } from '@/lib/fs-tree';
 import { formatBytes, formatRelativeTime } from '@/lib/format';
 import { quoteFolderName } from '@/lib/new-folders';
-import { rootFolderTargets, trackedBy, unknownColumns, type PathAction } from '@/lib/path-matrix';
+import {
+  rootFolderOwners,
+  rootFolderTargets,
+  trackedBy,
+  unknownColumns,
+  type PathAction,
+} from '@/lib/path-matrix';
 import { useMatrixStore } from '@/stores/matrix';
 import { usePathsStore } from '@/stores/paths';
 import { useQueueStore, type RootFolderTarget } from '@/stores/queue';
@@ -27,7 +32,6 @@ const matrix = useMatrixStore();
 const adding = ref<{ path: string; paths: string[]; preselect: number[] } | null>(null);
 const remapping = ref<string | null>(null);
 const removing = ref<RootFolderTarget[] | null>(null);
-const reconciling = ref<string | null>(null);
 const operation = ref<{ operation: DiskOperation; target: string } | null>(null);
 const creating = ref<{ parent: string; source: string } | null>(null);
 
@@ -99,9 +103,6 @@ function runAction(node: PathNode, action: PathAction): void {
     case 'remap':
       remapping.value = node.path;
       return;
-    case 'reconcile':
-      reconciling.value = node.path;
-      return;
     case 'rename':
       operation.value = { operation: 'rename', target: node.path };
       return;
@@ -149,13 +150,33 @@ function removeOwner(node: PathNode, target: { instanceId: number; rootFolderId:
   ];
 }
 
-/** The instances a relocation would leave dangling, passed to the disk dialog. */
-const operationTrackedBy = computed(() => {
+/** The node the disk dialog is about, once - both of its instance lists come from it. */
+const operationNode = computed(() => {
   const target = operation.value?.target;
-  if (target === undefined) return [];
-  const node = paths.nodeAt(target);
-  return node === null ? [] : trackedBy(node);
+  return target === undefined ? null : paths.nodeAt(target);
 });
+
+/** The instances a relocation would leave dangling, passed to the disk dialog. */
+const operationTrackedBy = computed(() =>
+  operationNode.value === null ? [] : trackedBy(operationNode.value),
+);
+
+/**
+ * The instances a rename can carry with it: the folder's own root-folder owners, never the
+ * fleet bar's selection. This is what used to be a second row action, `align`; it is the
+ * *Arr half of the one rename dialog now, chosen per instance in there.
+ */
+const operationAlignTargets = computed(() =>
+  operationNode.value === null
+    ? []
+    : rootFolderOwners(operationNode.value).map((owner) => ({
+        instanceId: owner.instanceId,
+        name: owner.name,
+        kind: owner.kind,
+        rootFolderId: owner.rootFolderId,
+        mediaUnder: owner.mediaUnder,
+      })),
+);
 
 /**
  * Free space is a property of a filesystem, not of an instance.
@@ -537,12 +558,12 @@ environment:
     />
     <RemapDialog v-if="remapping" :from-path="remapping" @close="remapping = null" />
     <RemoveRootFoldersDialog v-if="removing" :targets="removing" @close="removing = null" />
-    <ReconcileDialog v-if="reconciling" :path="reconciling" @close="reconciling = null" />
     <DiskOperationModal
       v-if="operation"
       :operation="operation.operation"
       :target="operation.target"
       :tracked-by="operationTrackedBy"
+      :align-targets="operationAlignTargets"
       @close="operation = null"
     />
   </div>

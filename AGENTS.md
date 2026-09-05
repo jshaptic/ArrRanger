@@ -129,9 +129,15 @@ distinct filesystem per request, seeded from `FS_ROOTS`. `⚠ low` only ever lan
 - **Removing a root folder is a button on the owner card**, never a bare click on a chip.
 - **Creating folders is a toolbar action, not a row action** (`New folder(s)…`), taking the
   syntax `mkdir -p` takes, expanded by the same `expandBraces`, previewed and preflighted.
+- **Renaming is one action, never a `rename` beside an `align`.** Both asked for the same
+  new name and differed only in whether the *Arr half ran, so the choice belongs inside the
+  dialog: the folder's root-folder owners are checkboxes there, and the disk step is always
+  the head of the chain. The row labels it `rename & align` when there is something to
+  carry.
 - **Do not offer an align chain for renaming an individual media folder.**
   `media.moveRootFolder` only sets `rootFolderPath` and `media.refresh` re-reads the stored
-  path, so nothing can make *Arr adopt a renamed media folder.
+  path, so nothing can make *Arr adopt a renamed media folder. A media folder has no
+  root-folder owners, so the rename dialog offers it nothing to follow.
 
 ## The queue engine
 

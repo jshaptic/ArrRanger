@@ -515,22 +515,31 @@ export const useQueueStore = defineStore('queue', () => {
         const rootFolderId = created.items[0]?.id ?? renameId;
 
         // Step 3: realign the media. moveFiles is false by design.
-        const realigned = await queueApi.push([
-          {
-            instanceId: target.instanceId,
-            op: 'media.moveRootFolder',
-            payload: {
-              mediaIds: [...target.mediaIds],
-              toRootFolderPath: params.to,
-              moveFiles: false,
+        //
+        // An instance with nothing under the folder skips this and the rescan: a root
+        // folder can be configured before a single download (see `PathOwner.use`), and a
+        // bulk edit with no ids is a request *Arr has no reason to accept. Re-pointing it
+        // is still the create-and-drop pair below, so the instance is never left out.
+        let realignId = rootFolderId;
+
+        if (target.mediaIds.length > 0) {
+          const realigned = await queueApi.push([
+            {
+              instanceId: target.instanceId,
+              op: 'media.moveRootFolder',
+              payload: {
+                mediaIds: [...target.mediaIds],
+                toRootFolderPath: params.to,
+                moveFiles: false,
+              },
+              dependsOnId: rootFolderId,
             },
-            dependsOnId: rootFolderId,
-          },
-        ]);
-        const realignId = realigned.items[0]?.id ?? rootFolderId;
+          ]);
+          realignId = realigned.items[0]?.id ?? rootFolderId;
+        }
 
         // Step 4: make the instance look at the new paths.
-        if (params.refreshAfter) {
+        if (params.refreshAfter && target.mediaIds.length > 0) {
           await queueApi.push([
             {
               instanceId: target.instanceId,

@@ -854,11 +854,15 @@ describe('PathMatrixView', () => {
 
   // --------------------------------------------------------------- disk actions
 
-  it('offers align on a root folder, and never a re-map on a plain folder', async () => {
+  // One rename button, not a rename *and* an align: the folder's own root-folder owners
+  // decide which of the two it is, and the label says which before it is clicked.
+  it('names the rename after what it carries, and never offers a re-map on a plain folder', async () => {
     const wrapper = await mountView();
 
-    expect(rowAt(wrapper, '/data/media/movies').text()).toContain('align');
+    expect(rowAt(wrapper, '/data/media/movies').text()).toContain('rename & align');
     expect(rowAt(wrapper, '/data/media/movies').text()).toContain('re-map');
+    expect(rowFor(wrapper, 'old-movies')?.text()).toContain('rename');
+    expect(rowFor(wrapper, 'old-movies')?.text()).not.toContain('rename & align');
     expect(rowFor(wrapper, 'old-movies')?.text()).not.toContain('re-map');
   });
 
@@ -1002,6 +1006,23 @@ describe('PathMatrixView', () => {
     for (let tick = 0; tick < 4; tick += 1) await flushPromises();
 
     expect(document.body.textContent).toContain('Radarr-4K has 806 item(s)');
+    // Nobody roots here, so there is nothing to carry the rename - and the dialog says so
+    // rather than pointing at a second button that no longer exists.
+    expect(document.body.querySelector('[data-testid="align-targets"]')).toBeNull();
+    wrapper.unmount();
+  });
+
+  it('a root folder rename opens with its owning instances ready to follow it', async () => {
+    const wrapper = await mountView();
+    const rename = rowAt(wrapper, '/data/media/movies')
+      .findAll('button')
+      .find((button) => button.text() === 'rename & align');
+    await rename?.trigger('click');
+    for (let tick = 0; tick < 6; tick += 1) await flushPromises();
+
+    const targets = document.body.querySelector('[data-testid="align-targets"]');
+    expect(targets?.textContent).toContain('Radarr-4K');
+    expect(targets?.querySelector<HTMLInputElement>('input')?.checked).toBe(true);
     wrapper.unmount();
   });
 

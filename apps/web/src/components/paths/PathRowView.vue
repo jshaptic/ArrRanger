@@ -5,7 +5,14 @@ import BaseButton from '@/components/base/BaseButton.vue';
 import PathFlagBadge from './PathFlagBadge.vue';
 import PathOwnerChips from './PathOwnerChips.vue';
 import { formatBytes, formatRelativeTime } from '@/lib/format';
-import { actionsFor, FLAG_STYLES, mediaSummary, SEVERITY_STYLES, type PathAction } from '@/lib/path-matrix';
+import {
+  actionsFor,
+  FLAG_STYLES,
+  mediaSummary,
+  rootFolderOwners,
+  SEVERITY_STYLES,
+  type PathAction,
+} from '@/lib/path-matrix';
 import { stagedIntent, TONE_CLASSES } from '@/lib/staging';
 
 const props = defineProps<{
@@ -47,11 +54,21 @@ const ACTION_LABELS: Record<Exclude<PathAction, 'focus'>, string> = {
   addRoot: 'add root folder',
   remove: 'remove',
   remap: 're-map',
-  reconcile: 'align',
   rename: 'rename',
   move: 'move',
   prune: 'prune',
 };
+
+/**
+ * `align` is not a button of its own any more - it is what a rename does when the folder is
+ * somebody's root folder, chosen per instance inside the one dialog. The label still says
+ * so, because the difference between the two renames is the whole point.
+ */
+function labelFor(action: Exclude<PathAction, 'focus'>): string {
+  return action === 'rename' && rootFolderOwners(props.node).length > 0
+    ? 'rename & align'
+    : ACTION_LABELS[action];
+}
 
 const allActions = computed(() => actionsFor(props.node));
 /** `focus` gets its own icon next to the name rather than a text button in the actions column. */
@@ -308,7 +325,7 @@ const spaceTitle = computed(() => {
           :disabled="busy"
           @click="emit('action', action)"
         >
-          {{ ACTION_LABELS[action] }}
+          {{ labelFor(action) }}
         </BaseButton>
       </span>
     </td>
