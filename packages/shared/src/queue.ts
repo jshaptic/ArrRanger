@@ -366,7 +366,7 @@ export function summariseQueueOp(item: NewQueueItem): string {
     case 'rootFolder.create':
       return `Add root folder ${item.payload.path}`;
     case 'rootFolder.delete':
-      return `Remove root folder ${item.payload.path}`;
+      return `Unassign root folder ${item.payload.path}`;
     case 'media.moveRootFolder':
       return `Move ${item.payload.mediaIds.length} item(s) to ${item.payload.toRootFolderPath}${
         item.payload.moveFiles ? ' (moving files on disk)' : ' (leaving files in place)'

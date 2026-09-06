@@ -98,7 +98,7 @@ describe('the path matrix', () => {
     // Inside the root folder, tracked by nobody.
     mkdirSync(path.join(films(), 'Orphan Film (1999)'), { recursive: true });
     mkdirSync(path.join(films(), 'Empty Folder'), { recursive: true });
-    // Alongside the root folder, and nobody's root folder: the headline signal.
+    // Alongside the root folder: unused, not itself a problem.
     mkdirSync(path.join(media, 'old-movies', 'Heat (1995)'), { recursive: true });
     symlinkSync(films(), path.join(media, 'films-link'));
 
@@ -179,14 +179,14 @@ describe('the path matrix', () => {
     assert.equal(rootFolder?.owners[0]?.name, 'Radarr', 'the chip renders without a join');
   });
 
-  test('a folder alongside a root folder that nobody roots is flagged', async () => {
+  test('a folder alongside a root folder that nobody roots is just unused', async () => {
     const body = await matrix();
     const node = nodeAt(levelFor(body, media), 'old-movies');
 
-    assert.equal(node?.flags.includes('candidate'), true, 'the "not a root folder" signal');
     assert.equal(node?.flags.includes('rootFolder'), false);
-    assert.deepEqual(node?.owners, [], 'nobody uses it - which is the whole point');
-    assert.ok((body.totals.candidates ?? 0) >= 1);
+    assert.equal(node?.flags.includes('unmanaged'), false);
+    assert.deepEqual(node?.owners, [], 'nobody uses it');
+    assert.equal(node?.severity, 'ok');
   });
 
   // --------------------------------------------------------------- the folder filter
@@ -226,14 +226,6 @@ describe('the path matrix', () => {
 
     assert.equal(filtered?.rollup.entries, all?.rollup.entries);
     assert.ok((filtered?.matched ?? 0) < (all?.matched ?? 0), 'only the rows on screen narrow');
-  });
-
-  test('only=candidates answers the headline question directly', async () => {
-    const body = await matrix(`?path=${encodeURIComponent(media)}&only=candidates`);
-    const names = levelFor(body, media)?.nodes.map((node) => node.name) ?? [];
-
-    assert.equal(names.includes('old-movies'), true);
-    assert.equal(names.includes('library'), false, 'a root folder is not a candidate');
   });
 
   test('an ancestor of a root folder is a container, not unmanaged media', async () => {
@@ -357,11 +349,10 @@ describe('the path matrix', () => {
 
     // An *Arr path the disk does not have is the one genuinely broken state.
     assert.equal(nodeAt(level, 'Gone Missing (2001)')?.severity, 'error');
-    // Alongside a root folder without being one, and holding media: the two questions
-    // this view exists to answer.
-    assert.equal(nodeAt(levelFor(await matrix(), media), 'old-movies')?.severity, 'warn');
+    // A sibling of a root folder that nobody tracks is not itself a problem.
+    assert.equal(nodeAt(levelFor(await matrix(), media), 'old-movies')?.severity, 'ok');
     // Inside a root folder, tracked by nobody. True of every non-media folder in a
-    // library, so it must stay quiet or it drowns the two above.
+    // library, so it must stay quiet or it drowns the real problems.
     assert.equal(nodeAt(level, 'Orphan Film (1999)')?.severity, 'info');
     assert.equal(nodeAt(level, 'The Matrix (1999)')?.severity, 'ok');
   });
@@ -371,8 +362,8 @@ describe('the path matrix', () => {
     const inside = await matrix(`?path=${encodeURIComponent(films())}&only=all`);
     assert.equal(levelFor(inside, films())?.rollup.severity, 'error');
 
-    // The mount holds old-movies, which is nobody's root folder.
-    assert.equal(levelFor(await matrix(), media)?.rollup.severity, 'warn');
+    // The mount holds a symlink, which is info; nothing louder sits beside the root folder.
+    assert.equal(levelFor(await matrix(), media)?.rollup.severity, 'info');
   });
 
   // ----------------------------------------------------------------- disk space

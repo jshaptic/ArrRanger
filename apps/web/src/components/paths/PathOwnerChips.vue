@@ -5,6 +5,7 @@ import PathOwnerCard from './PathOwnerCard.vue';
 import { initialsOf } from '@/lib/format';
 import { KIND_CLASSES, ownerHeadline, ownerMedia, USE_CLASSES } from '@/lib/path-matrix';
 import { stagedIntent, TONE_CLASSES } from '@/lib/staging';
+import IconCreate from '@/components/base/icons/IconCreate.vue';
 import IconUnknown from '@/components/base/icons/IconUnknown.vue';
 import IconWarning from '@/components/base/icons/IconWarning.vue';
 
@@ -18,7 +19,7 @@ import IconWarning from '@/components/base/icons/IconWarning.vue';
  * The chip carries the counts that fit on one line and hands the rest to
  * {@link PathOwnerCard} on hover or click. Everything the card shows used to live in a
  * `title` attribute, where it could not be read without a mouse and could not hold an
- * action - which is why removing a root folder used to be a bare click on the chip, with
+ * action - which is why unassigning a root folder used to be a bare click on the chip, with
  * nothing on screen saying so.
  */
 const props = defineProps<{
@@ -27,9 +28,19 @@ const props = defineProps<{
   /** Instances that could not be read - "no owner" and "unknown" must not look alike. */
   unknownCount: number;
   staged: (instanceId: number, path: string) => readonly QueueItem[];
+  /**
+   * A leaf folder that could take a root folder. Shown after the chips, always - it is
+   * how you attach an instance to a folder that has none, so hiding it on hover would
+   * hide the empty-cell action.
+   */
+  canAddRoot?: boolean;
+  busy?: boolean;
 }>();
 
-const emit = defineEmits<{ remove: [target: { instanceId: number; rootFolderId: number | null }] }>();
+const emit = defineEmits<{
+  addRoot: [];
+  remove: [target: { instanceId: number; rootFolderId: number | null }];
+}>();
 
 /** Long enough that dragging the pointer across a column does not flash cards. */
 const HOVER_MS = 160;
@@ -175,17 +186,28 @@ onBeforeUnmount(clearTimers);
         />
       </button>
 
-      <template v-if="owners.length === 0">
-        <span class="text-[11px] text-faint">—</span>
-        <!-- Only where "nobody" could be wrong. A row that already has an owner does not
-             need the caveat repeated on it; the notice above the table covers the rest. -->
-        <IconUnknown
-          v-if="unknownCount > 0"
-          size="xs"
-          class="text-danger/70"
-          :title="unknownTitle"
-        />
-      </template>
+      <!-- No dash for an unused folder: the add-root control (or an empty cell) is the
+           answer. The unknown glyph stays, because "nobody" and "we could not ask" are
+           different, and only the latter needs saying. -->
+      <IconUnknown
+        v-if="owners.length === 0 && unknownCount > 0"
+        size="xs"
+        class="text-danger/70"
+        :title="unknownTitle"
+      />
+
+      <button
+        v-if="canAddRoot"
+        type="button"
+        data-action="addRoot"
+        class="shrink-0 text-[11px] text-faint transition-colors hover:text-accent disabled:opacity-30"
+        title="add root folder"
+        aria-label="add root folder"
+        :disabled="busy"
+        @click="emit('addRoot')"
+      >
+        <IconCreate size="lg" />
+      </button>
     </div>
 
     <Teleport to="body">

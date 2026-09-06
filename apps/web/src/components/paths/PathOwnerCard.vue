@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { PathOwner } from '@arrranger/shared';
 import BaseButton from '@/components/base/BaseButton.vue';
 import { initialsOf } from '@/lib/format';
-import { KIND_CLASSES, ownerFacts, ownerHeadline } from '@/lib/path-matrix';
+import { KIND_CLASSES, ownerFacts } from '@/lib/path-matrix';
 import { TONE_CLASSES, type OpPresentation } from '@/lib/staging';
 
 /**
@@ -20,7 +20,7 @@ import { TONE_CLASSES, type OpPresentation } from '@/lib/staging';
  */
 const props = defineProps<{
   owner: PathOwner;
-  /** The folder the card is about - descendant paths are said relative to it. */
+  /** The folder the card is about. */
   path: string;
   /** Viewport coordinates of the chip that opened this. */
   anchor: { readonly top: number; readonly bottom: number; readonly left: number };
@@ -37,7 +37,6 @@ const card = ref<HTMLElement | null>(null);
 const placed = ref<{ left: number; top: number } | null>(null);
 
 const facts = computed(() => ownerFacts(props.owner, props.path));
-const headline = computed(() => ownerHeadline(props.owner));
 const removable = computed(() => props.owner.use === 'rootFolder');
 
 const TONE_TEXT = {
@@ -95,7 +94,7 @@ onBeforeUnmount(() => {
   <div
     ref="card"
     role="dialog"
-    :aria-label="`${owner.name} and ${path}`"
+    :aria-label="`How ${owner.name} uses ${path}`"
     data-testid="owner-card"
     class="fixed z-50 w-72 rounded-lg border border-line-strong bg-surface p-3 text-xs shadow-xl"
     :style="{
@@ -114,10 +113,6 @@ onBeforeUnmount(() => {
       <span class="min-w-0 flex-1 truncate font-semibold text-ink">{{ owner.name }}</span>
       <span class="text-[10px] tracking-wide text-faint uppercase">{{ owner.kind }}</span>
     </header>
-
-    <p class="mt-1 text-[11px]" :class="owner.accessible === false ? 'text-drift' : 'text-muted'">
-      {{ headline }}
-    </p>
 
     <p
       v-if="staged"
@@ -146,7 +141,7 @@ onBeforeUnmount(() => {
 
     <div v-if="removable" class="mt-2 flex justify-end border-t border-line pt-2">
       <BaseButton size="sm" variant="danger" @click="emit('remove')">
-        Remove root folder
+        Unassign root folder
       </BaseButton>
     </div>
   </div>

@@ -47,7 +47,6 @@ function rollup(overrides: Partial<PathRollup> = {}): PathRollup {
     neutral: 0,
     missing: 0,
     rootFolders: 0,
-    candidates: 0,
     symlinks: 0,
     empty: null,
     unreadable: null,
@@ -169,19 +168,19 @@ const TV = node('/data/media/tv', {
   severity: 'warn',
   canAddRootFolder: false,
 });
-/** The headline signal: sits next to root folders, is not one, still full of films. */
+/** Holds films, but sits under no root folder. */
 const OLD_MOVIES = node('/data/media/old-movies', {
-  flags: ['candidate', 'unmanaged'],
+  flags: ['unmanaged'],
   childCount: 814,
   owners: [owner(1, 'ancestor', { mediaUnder: 806 })],
   severity: 'warn',
 });
 /** Nobody's root folder and nothing tracked under it: safe to prune. */
 const SPARE = node('/data/media/spare', {
-  flags: ['candidate'],
+  flags: [],
   childCount: 0,
   expandable: false,
-  severity: 'warn',
+  severity: 'ok',
 });
 
 /** A root folder outside FS_ROOTS - the mapping diagnosis, as a row. */
@@ -291,7 +290,6 @@ const matrixApi = vi.fn((params: MatrixCall = {}) => {
       unmanaged: 0,
       untracked: 4,
       missing: 2,
-      candidates: 1,
     },
     mismatches: [],
   });
@@ -433,11 +431,11 @@ describe('PathMatrixView', () => {
     expect(matrixApi).toHaveBeenCalledTimes(1);
   });
 
-  it('flags a folder that is nobody root folder', async () => {
+  it('flags a folder that holds media nothing roots at', async () => {
     const wrapper = await mountView();
     const row = rowFor(wrapper, 'old-movies');
 
-    expect(row?.text()).toContain('not a root folder');
+    expect(row?.text()).toContain('unmanaged');
   });
 
   it('flags a root folder an instance cannot reach', async () => {
@@ -459,7 +457,7 @@ describe('PathMatrixView', () => {
     // badge there was 79 identical chips saying what the row is about.
     expect(row.find('th').text()).not.toContain('root folder');
     expect(row.find('[data-name]').classes()).toContain('text-sync');
-    // A folder that is nobody's root folder keeps the plain name and gains a badge.
+    // A folder that is nobody's root folder keeps the plain name.
     expect(rowAt(wrapper, '/data/media/old-movies').find('[data-name]').classes()).toContain('text-ink');
   });
 
@@ -467,18 +465,29 @@ describe('PathMatrixView', () => {
     const wrapper = await mountView();
 
     expect(wrapper.findAll('thead th').map((cell) => cell.text())).not.toContain('State');
+    expect(wrapper.findAll('thead th').map((cell) => cell.text())).not.toContain('Row actions');
 
-    // Badge and glyph both live in the path cell, next to the name they describe.
+    // Glyph stays by the name; word badges sit after the row actions, still in the path cell.
     const row = rowAt(wrapper, '/data/media/old-movies');
-    expect(row.find('th').text()).toContain('not a root folder');
+    expect(row.find('th').text()).toContain('unmanaged');
     expect(row.find('th [data-severity="own"]').exists()).toBe(true);
+    const pathCell = row.find('th').element;
+    const badge = [...pathCell.querySelectorAll('span')].find((el) => el.textContent?.trim() === 'unmanaged');
+    const rename = pathCell.querySelector('[data-action="rename"]');
+    expect(badge).toBeTruthy();
+    expect(rename).toBeTruthy();
+    expect(
+      Boolean(rename && badge && Boolean(rename.compareDocumentPosition(badge) & Node.DOCUMENT_POSITION_FOLLOWING)),
+    ).toBe(true);
   });
 
   it('does not offer to expand a root folder', async () => {
     const wrapper = await mountView();
-    const row = rowAt(wrapper, '/data/media/movies');
+    const twisty = rowAt(wrapper, '/data/media/movies').find('[data-testid="path-twisty"]');
 
-    expect(row.find('[data-testid="path-twisty"]').exists()).toBe(false);
+    expect(twisty.exists()).toBe(true);
+    expect(twisty.element.tagName).not.toBe('BUTTON');
+    expect(twisty.attributes('title')).toContain('not expanded');
   });
 
   it('drops the twisty and the focus icon in the flat list - there is no tree to walk', async () => {
@@ -525,7 +534,7 @@ describe('PathMatrixView', () => {
     expect(rowAt(wrapper, '/data/media/tv').text()).toContain('Radarr-HD');
     // Nobody's folder says so once, rather than in a column per instance.
     expect(rowAt(wrapper, '/data/media/spare').findAll('[data-owner]').length).toBe(0);
-    expect(rowAt(wrapper, '/data/media/spare').text()).toContain('—');
+    expect(rowAt(wrapper, '/data/media/spare').find('td').text()).not.toContain('—');
   });
 
   it('renders every owner when two instances do root at one folder', async () => {
@@ -543,7 +552,7 @@ describe('PathMatrixView', () => {
         roots: [],
         columns: [],
         levels: [level(null, [shared])],
-        totals: { rootFolderPaths: 1, unseenRootFolders: 0, unmanaged: 0, untracked: 0, missing: 0, candidates: 0 },
+        totals: { rootFolderPaths: 1, unseenRootFolders: 0, unmanaged: 0, untracked: 0, missing: 0 },
         mismatches: [],
       }),
     );
@@ -574,9 +583,10 @@ describe('PathMatrixView', () => {
     const wrapper = await mountView();
     const row = rowAt(wrapper, '/data/media/old-movies');
 
-    const action = row.findAll('button').find((button) => button.text() === 'add root folder');
-    expect(action).toBeDefined();
-    await action?.trigger('click');
+    const action = row.find('td [data-action="addRoot"]');
+    expect(action.exists()).toBe(true);
+    expect(row.find('th [data-action="addRoot"]').exists()).toBe(false);
+    await action.trigger('click');
     await flushPromises();
 
     expect(document.body.textContent).toContain('Add a root folder to the fleet');
@@ -594,7 +604,9 @@ describe('PathMatrixView', () => {
 
     const card = document.body.querySelector('[data-testid="owner-card"]');
     expect(card?.textContent).toContain('Radarr-4K');
-    expect(card?.textContent).toContain('root folder here');
+    expect(card?.textContent).toContain('Used as');
+    expect(card?.textContent).toContain('root folder');
+    expect(card?.textContent).not.toContain('as this instance sees it');
     // Tracked and on disk are separate facts: the gap is the backlog, not missing media.
     expect(card?.textContent).toContain('812 items at or under here');
     expect(card?.textContent).toContain('806 on disk');
@@ -602,13 +614,13 @@ describe('PathMatrixView', () => {
     expect(card?.textContent).toContain('Trakt watchlist - adds automatically');
   });
 
-  it('the card is where a root folder is removed, so the action is named before it runs', async () => {
+  it('the card is where a root folder is unassigned, so the action is named before it runs', async () => {
     const wrapper = await mountView();
     await rowAt(wrapper, '/data/media/movies').find('[data-owner="rootFolder"]').trigger('click');
     await flushPromises();
 
     const remove = [...document.body.querySelectorAll('button')].find(
-      (button) => button.textContent?.trim() === 'Remove root folder',
+      (button) => button.textContent?.trim() === 'Unassign root folder',
     );
     expect(remove).toBeDefined();
     remove?.click();
@@ -626,10 +638,11 @@ describe('PathMatrixView', () => {
     await flushPromises();
 
     const card = document.body.querySelector('[data-testid="owner-card"]');
-    expect(card?.textContent).toContain('holds media below this folder');
+    expect(card?.textContent).toContain('Used for');
+    expect(card?.textContent).toContain('media below this folder');
     expect(
       [...document.body.querySelectorAll('button')].some(
-        (button) => button.textContent?.trim() === 'Remove root folder',
+        (button) => button.textContent?.trim() === 'Unassign root folder',
       ),
     ).toBe(false);
   });
@@ -650,12 +663,14 @@ describe('PathMatrixView', () => {
     await flushPromises();
 
     const card = document.body.querySelector('[data-testid="owner-card"]');
-    expect(card?.textContent).toContain('1 root folder below this one');
+    expect(card?.textContent).toContain('Used for');
+    expect(card?.textContent).toContain('1 root folder below');
     expect(card?.textContent).toContain('nothing tracked here');
-    // Every list, named, with where it lands - not a count.
-    expect(card?.textContent).toContain('2 lists add below here');
-    expect(card?.textContent).toContain('tv: Series watchlist - adds automatically');
-    expect(card?.textContent).toContain('tv: Kids picks - disabled');
+    // Named lists only - the folder they fill is that row's, not this parent's.
+    expect(card?.textContent).toContain('2 lists');
+    expect(card?.textContent).toContain('Series watchlist - adds automatically');
+    expect(card?.textContent).toContain('Kids picks - disabled');
+    expect(card?.textContent).not.toContain('tv: Series watchlist');
   });
 
   // ------------------------------------------------------------------ monitoring
@@ -697,7 +712,7 @@ describe('PathMatrixView', () => {
         roots: [],
         columns: [],
         levels: [level(null, [low]), level('/data', [child])],
-        totals: { rootFolderPaths: 0, unseenRootFolders: 0, unmanaged: 0, untracked: 0, missing: 0, candidates: 0 },
+        totals: { rootFolderPaths: 0, unseenRootFolders: 0, unmanaged: 0, untracked: 0, missing: 0 },
         mismatches: [],
       }),
     );
@@ -811,7 +826,7 @@ describe('PathMatrixView', () => {
 
     const add = wrapper
       .findAll('button')
-      .find((button) => button.text().includes('Add root folder here…'));
+      .find((button) => /^\s*Assign\s*\(\d+\)\s*$/.test(button.text()));
     expect(add?.text()).toContain('(1)');
     await add?.trigger('click');
     await flushPromises();
@@ -856,22 +871,38 @@ describe('PathMatrixView', () => {
 
   // One rename button, not a rename *and* an align: the folder's own root-folder owners
   // decide which of the two it is, and the label says which before it is clicked.
+  it('offers add root folder on a leaf, in Used by, and never on a parent', async () => {
+    const wrapper = await mountView();
+
+    expect(rowAt(wrapper, '/data').find('[data-action="addRoot"]').exists()).toBe(false);
+    expect(rowAt(wrapper, '/data/media').find('[data-action="addRoot"]').exists()).toBe(false);
+    expect(rowAt(wrapper, '/data/media/old-movies').find('td [data-action="addRoot"]').exists()).toBe(
+      true,
+    );
+    expect(rowAt(wrapper, '/data/media/movies').find('[data-action="addRoot"]').exists()).toBe(false);
+  });
+
   it('names the rename after what it carries, and never offers a re-map on a plain folder', async () => {
     const wrapper = await mountView();
 
-    expect(rowAt(wrapper, '/data/media/movies').text()).toContain('rename & align');
-    expect(rowAt(wrapper, '/data/media/movies').text()).toContain('re-map');
-    expect(rowFor(wrapper, 'old-movies')?.text()).toContain('rename');
-    expect(rowFor(wrapper, 'old-movies')?.text()).not.toContain('rename & align');
-    expect(rowFor(wrapper, 'old-movies')?.text()).not.toContain('re-map');
+    const movies = rowAt(wrapper, '/data/media/movies');
+    expect(movies.find('[data-action="rename"]').exists()).toBe(true);
+    expect(movies.find('[data-action="rename"]').attributes('title')).toBe('rename & align');
+    expect(movies.find('[data-action="remap"]').exists()).toBe(true);
+    expect(movies.find('th [data-action="rename"]').exists()).toBe(true);
+
+    const leftover = rowFor(wrapper, 'old-movies');
+    expect(leftover?.find('[data-action="rename"]').attributes('title')).toBe('rename');
+    expect(leftover?.find('[data-action="remap"]').exists()).toBe(false);
   });
 
   it('never offers a disk action on a mount', async () => {
     const wrapper = await mountView();
     const row = rowAt(wrapper, '/data');
 
-    expect(row.text()).not.toContain('prune');
-    expect(row.text()).not.toContain('rename');
+    expect(row.find('[data-action="prune"]').exists()).toBe(false);
+    expect(row.find('[data-action="move"]').exists()).toBe(false);
+    expect(row.find('[data-action="rename"]').exists()).toBe(false);
   });
 
   it('creates folders from one toolbar button, never from a row', async () => {
@@ -967,10 +998,9 @@ describe('PathMatrixView', () => {
 
   it('pruning requires typing the folder name, then stages one fs.delete', async () => {
     const wrapper = await mountView();
-    const prune = rowAt(wrapper, '/data/media/spare')
-      .findAll('button')
-      .find((button) => button.text() === 'prune');
-    await prune?.trigger('click');
+    const prune = rowAt(wrapper, '/data/media/spare').find('[data-action="prune"]');
+    expect(prune.attributes('title')).toBe('remove');
+    await prune.trigger('click');
     for (let tick = 0; tick < 4; tick += 1) await flushPromises();
 
     const confirm = [...document.body.querySelectorAll('button')].find((button) =>
@@ -999,9 +1029,7 @@ describe('PathMatrixView', () => {
 
   it('warns before relocating a folder an instance still tracks', async () => {
     const wrapper = await mountView();
-    const rename = rowAt(wrapper, '/data/media/old-movies')
-      .findAll('button')
-      .find((button) => button.text() === 'rename');
+    const rename = rowAt(wrapper, '/data/media/old-movies').find('[data-action="rename"]');
     await rename?.trigger('click');
     for (let tick = 0; tick < 4; tick += 1) await flushPromises();
 
@@ -1014,9 +1042,7 @@ describe('PathMatrixView', () => {
 
   it('a root folder rename opens with its owning instances ready to follow it', async () => {
     const wrapper = await mountView();
-    const rename = rowAt(wrapper, '/data/media/movies')
-      .findAll('button')
-      .find((button) => button.text() === 'rename & align');
+    const rename = rowAt(wrapper, '/data/media/movies').find('[data-action="rename"]');
     await rename?.trigger('click');
     for (let tick = 0; tick < 6; tick += 1) await flushPromises();
 
@@ -1043,6 +1069,24 @@ describe('PathMatrixView', () => {
     for (const path of ['/data/media/movies', '/data/media/tv', '/data/media/spare', '/elsewhere/movies']) {
       expect(rowAt(wrapper, path).find('input[type="checkbox"]').exists()).toBe(true);
     }
+  });
+
+  /**
+   * The checkbox is a column of its own. Nesting used to pad the whole row, so a
+   * depth-2 leaf's box sat under its parent's name rather than under the header box.
+   */
+  it('pins the checkbox to the left of the row and indents only the tree', async () => {
+    const wrapper = await mountView();
+
+    const root = rowAt(wrapper, '/data');
+    const leaf = rowAt(wrapper, '/data/media/movies');
+
+    expect(root.find('[data-testid="path-tree"]').attributes('style') ?? '').not.toContain(
+      'padding-left',
+    );
+    expect(leaf.find('[data-testid="path-tree"]').attributes('style')).toContain('padding-left: 2rem');
+    expect(leaf.find('[data-testid="path-tree"] input[type="checkbox"]').exists()).toBe(false);
+    expect(leaf.find('th input[type="checkbox"]').exists()).toBe(true);
   });
 
   it('selects exactly the rows in the table, and clears everything', async () => {

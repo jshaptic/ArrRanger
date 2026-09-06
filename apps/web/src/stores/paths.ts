@@ -40,7 +40,6 @@ function emptyTotals(): PathMatrixTotals {
     unmanaged: 0,
     untracked: 0,
     missing: 0,
-    candidates: 0,
   };
 }
 

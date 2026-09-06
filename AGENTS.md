@@ -87,15 +87,15 @@ what *Arr reports), since disagreement is the mapping diagnosis.
 
 ### Monitoring and free space
 
-Row badges are computed **server-side** so the vocabulary cannot drift: `not a root
-folder`, `untracked`, `unmanaged`, `missing`, `not mounted here`, `empty`, `symlink`,
-`no access`, `read-only`. They render beside the name at the right of the Path column,
-then anything staged, then the glyph. There is no State column.
+Row badges are computed **server-side** so the vocabulary cannot drift: `untracked`,
+`unmanaged`, `missing`, `not mounted here`, `empty`, `symlink`, `no access`,
+`read-only`. They render at the right of the Path column, after the row actions.
+Staged work and the severity glyph stay beside the name. There is no State column.
 
 | Severity | Source | Rendered |
 |---|---|---|
 | `error` | `not mounted here`, `missing`, `no access` | red error icon |
-| `warn` | `not a root folder`, `unmanaged`, `read-only`, low free space, a root folder its own instance calls inaccessible | amber warning icon |
+| `warn` | `unmanaged`, `read-only`, low free space, a root folder its own instance calls inaccessible | amber warning icon |
 | `info` | `untracked`, `empty`, `symlink` | nothing |
 | `ok` | none of the above | nothing |
 
@@ -118,18 +118,6 @@ ever lands on a **mount or a root folder**. Never restore a per-instance total.
 - `q` implies `only=all`; excluding does not. An unparseable filter is never sent; the
   API rejects it with 400 rather than returning an unfiltered tree.
 - **No "Modified" sort.** A level comes from one `readdir`, which carries no mtime.
-
-### Actions
-
-- **Never infer the instance from the fleet bar** - the bar is a filter only. Remove and
-  realign take instances from the folder's own owners; an action that *adds* a root
-  folder must ask. Every dialog names each instance before anything is staged.
-- **Removing a root folder is a button on the owner card**, never a bare click on a chip.
-- **Creating folders is a toolbar action, not a row action** (`New folder(s)…`), `mkdir -p`
-  syntax, expanded by `expandBraces`, previewed and preflighted.
-- **Do not offer an align chain for renaming an individual media folder.**
-  `media.moveRootFolder` only sets `rootFolderPath` and `media.refresh` re-reads the
-  stored path, so nothing can make *Arr adopt a renamed media folder.
 
 ## The queue engine
 

@@ -14,7 +14,7 @@ import {
   type PathSeverity,
   type PathUse,
 } from '@arrranger/shared';
-import { formatBytes, pluralise } from './format';
+import { pluralise } from './format';
 
 /**
  * Turning the server's levels into table rows.
@@ -306,21 +306,24 @@ export function mediaSummary(node: PathNode): { label: string; detail: string } 
  * severity vocabularies are computed once, server-side.
  */
 
-/** The claim, in words. `containsRoot` counts, because "roots below" begs "how many". */
+/**
+ * How this instance uses the folder, as a sentence. The chip tooltip and the card
+ * headline share it so they cannot disagree.
+ */
 export function ownerHeadline(owner: PathOwner): string {
   switch (owner.use) {
     case 'rootFolder':
       return owner.accessible === false
-        ? 'root folder here - it cannot see it'
-        : 'root folder here';
+        ? 'used as a root folder — it cannot see it'
+        : 'used as a root folder';
     case 'tracked':
-      return owner.title === null ? 'tracks an item at this path' : `tracks “${owner.title}” here`;
+      return owner.title === null ? 'used to track an item here' : `used to track “${owner.title}”`;
     case 'containsRoot':
-      return `${pluralise(owner.rootFoldersUnder.length, 'root folder')} below this one`;
+      return `used for ${pluralise(owner.rootFoldersUnder.length, 'root folder')} below`;
     case 'ancestor':
-      return 'holds media below this folder';
+      return 'used for media below this folder';
     case 'importList':
-      return 'an import list fills this folder';
+      return 'used by an import list';
   }
 }
 
@@ -353,14 +356,9 @@ export function ownerMedia(owner: PathOwner): OwnerMetric {
 export interface OwnerFact {
   readonly label: string;
   readonly value: string;
-  /** Named things behind the number - list names, root folder paths. */
+  /** Named things behind the number - list names. */
   readonly detail: readonly string[];
   readonly tone: 'normal' | 'warn' | 'muted';
-}
-
-/** A descendant path, said relative to the folder the card is about. */
-function relativeTo(target: string, base: string): string {
-  return target.startsWith(`${base}/`) ? target.slice(base.length + 1) : target;
 }
 
 /** "1 list adds here", "2 lists add here" - the verb has to agree with the count. */
@@ -368,22 +366,66 @@ function adds(count: number): string {
   return count === 1 ? 'adds' : 'add';
 }
 
-/**
- * One list, with where it lands when that is not the folder being read - the whole point
- * of naming the ones aimed below rather than counting them.
- */
-function describeList(list: PathImportList, path: string): string {
+/** One list, named and stated - never the folder it fills. That belongs on that folder's row. */
+function describeList(list: PathImportList): string {
   const state = !list.enabled ? 'disabled' : list.automatic ? 'adds automatically' : 'manual add';
-  const target = list.path === path ? '' : `${relativeTo(list.path, path)}: `;
-  return `${target}${list.name} - ${state}`;
+  return `${list.name} - ${state}`;
+}
+
+/**
+ * How this instance uses the folder, as a fact - same shape as Media, so the card is one
+ * definition list of "used as / used for" rather than a headline plus a dump of sections.
+ */
+function ownerUseFact(owner: PathOwner): OwnerFact {
+  switch (owner.use) {
+    case 'rootFolder':
+      return {
+        label: 'Used as',
+        value: owner.accessible === false ? 'root folder — it cannot see it' : 'root folder',
+        detail: [],
+        tone: owner.accessible === false ? 'warn' : 'normal',
+      };
+    case 'tracked':
+      return {
+        label: 'Used as',
+        value: owner.title === null ? 'a tracked item' : `tracks “${owner.title}”`,
+        detail: [],
+        tone: 'normal',
+      };
+    case 'containsRoot':
+      return {
+        label: 'Used for',
+        value: `${pluralise(owner.rootFoldersUnder.length, 'root folder')} below`,
+        detail: [],
+        tone: 'normal',
+      };
+    case 'ancestor':
+      return {
+        label: 'Used for',
+        value: 'media below this folder',
+        detail: [],
+        tone: 'normal',
+      };
+    case 'importList':
+      return {
+        label: 'Used by',
+        value: 'an import list',
+        detail: [],
+        tone: 'warn',
+      };
+  }
 }
 
 /**
  * The card body. Every fact is stated even when it is a zero, because "no import list
  * points here" and "we did not look" are different answers and only one of them is true.
+ *
+ * There is no Root folder section: that the instance roots here (or below) is the
+ * use line, and listing the folders a parent contains mixed those paths into the
+ * import lists.
  */
 export function ownerFacts(owner: PathOwner, path: string): OwnerFact[] {
-  const facts: OwnerFact[] = [];
+  const facts: OwnerFact[] = [ownerUseFact(owner)];
 
   if (owner.mediaUnder === 0) {
     facts.push({ label: 'Media', value: 'nothing tracked here', detail: [], tone: 'muted' });
@@ -402,40 +444,25 @@ export function ownerFacts(owner: PathOwner, path: string): OwnerFact[] {
     });
   }
 
-  if (owner.use === 'rootFolder') {
-    facts.push({
-      label: 'Root folder',
-      value: owner.accessible === false ? 'here, reported inaccessible' : 'here',
-      detail:
-        owner.freeSpace === null
-          ? []
-          : [
-              `${formatBytes(owner.freeSpace)} free${owner.totalSpace === null ? '' : ` of ${formatBytes(owner.totalSpace)}`}, as this instance sees it`,
-            ],
-      tone: owner.accessible === false ? 'warn' : 'normal',
-    });
-  }
-
-  // Every list, named, however deep it lands. The summary line says how they split
-  // between this folder and the ones under it, because that is what decides whether
-  // re-pointing *this* folder changes anything.
-  const here = owner.importLists.filter((list) => list.path === path).length;
-  const below = owner.importLists.length - here;
+  const here = owner.importLists.filter((list) => list.path === path);
+  const below = owner.importLists.filter((list) => list.path !== path);
 
   if (owner.importLists.length === 0) {
     facts.push({ label: 'Import lists', value: 'none point here', detail: [], tone: 'muted' });
   } else {
+    // Lists aimed at a descendant root folder still belong on this card (they fill
+    // something under here) but they are named only - the folder they land in is that
+    // row's business, and prefixing "tv:" made a parent look like it *was* those lists'
+    // root folder.
     facts.push({
       label: 'Import lists',
       value:
-        here === 0
-          ? `${pluralise(below, 'list')} ${adds(below)} below here`
-          : below === 0
-            ? `${pluralise(here, 'list')} ${adds(here)} here`
-            : `${pluralise(here, 'list')} ${adds(here)} here, ${String(below)} below`,
-      detail: owner.importLists.map((list) => describeList(list, path)),
-      // A list filling a folder its instance does not root at is the one shape of this
-      // fact that is a question rather than a statement.
+        below.length === 0
+          ? `${pluralise(here.length, 'list')} ${adds(here.length)} here`
+          : here.length === 0
+            ? pluralise(below.length, 'list')
+            : `${pluralise(here.length, 'list')} ${adds(here.length)} here, ${String(below.length)} more`,
+      detail: owner.importLists.map(describeList),
       tone: owner.use === 'importList' ? 'warn' : 'normal',
     });
   }
@@ -542,11 +569,6 @@ export const FLAG_STYLES: Record<PathFlag, { label: string; classes: string; tit
     label: 'root folder',
     classes: 'border-sync/50 bg-sync/10 text-sync',
     title: 'A root folder on at least one instance',
-  },
-  candidate: {
-    label: 'not a root folder',
-    classes: 'border-drift/50 bg-drift/10 text-drift',
-    title: 'Sits alongside a root folder without being one on any instance',
   },
   untracked: {
     label: 'untracked',

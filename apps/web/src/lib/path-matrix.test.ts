@@ -34,7 +34,6 @@ function rollup(overrides: Partial<PathRollup> = {}): PathRollup {
     neutral: 0,
     missing: 0,
     rootFolders: 0,
-    candidates: 0,
     symlinks: 0,
     empty: null,
     unreadable: null,
@@ -345,7 +344,7 @@ describe('actionsFor', () => {
   });
 
   it('offers the disk actions on a folder nobody roots', () => {
-    const target = node('/data/media/old-movies', { flags: ['candidate'], owners: [] });
+    const target = node('/data/media/old-movies', { flags: [], owners: [] });
     const actions = actionsFor(target);
 
     expect(actions).toEqual(expect.arrayContaining(['addRoot', 'rename', 'move', 'prune']));
@@ -537,13 +536,13 @@ describe('levelKey', () => {
 
 describe('the owner card', () => {
   it('names the claim, and counts the one that begs a number', () => {
-    expect(ownerHeadline(owner(1, 'rootFolder'))).toBe('root folder here');
+    expect(ownerHeadline(owner(1, 'rootFolder'))).toBe('used as a root folder');
     expect(ownerHeadline(owner(1, 'rootFolder', { accessible: false }))).toContain('cannot see it');
     expect(ownerHeadline(owner(1, 'tracked'))).toContain('A Title');
-    expect(ownerHeadline(owner(1, 'ancestor'))).toBe('holds media below this folder');
+    expect(ownerHeadline(owner(1, 'ancestor'))).toBe('used for media below this folder');
     expect(
       ownerHeadline(owner(1, 'containsRoot', { rootFoldersUnder: ['/a/x', '/a/y'] })),
-    ).toBe('2 root folders below this one');
+    ).toBe('used for 2 root folders below');
   });
 
   it('puts one number on the chip: this instance share of the folder, zero included', () => {
@@ -566,18 +565,21 @@ describe('the owner card', () => {
     expect(media?.detail).toEqual(['806 on disk', '6 monitored, not downloaded']);
   });
 
-  it('leaves root folders below to the headline, which already counts them', () => {
+  it('states the use as a fact, and never a Root folder section beside it', () => {
     const target = owner(1, 'containsRoot', { rootFoldersUnder: ['/data/media/tv'] });
 
-    expect(ownerHeadline(target)).toBe('1 root folder below this one');
-    // Stating it twice in one card is duplication, not emphasis.
+    expect(ownerHeadline(target)).toBe('used for 1 root folder below');
     expect(ownerFacts(target, '/data/media').map((fact) => fact.label)).toEqual([
+      'Used for',
       'Media',
       'Import lists',
     ]);
+    expect(ownerFacts(owner(1, 'rootFolder'), '/data/media/movies').some((f) => f.label === 'Root folder')).toBe(
+      false,
+    );
   });
 
-  it('names every list, and says where the ones aimed below land', () => {
+  it('names every list, and does not prefix the folder they fill', () => {
     const facts = ownerFacts(
       owner(1, 'containsRoot', {
         rootFoldersUnder: ['/data/media/tv'],
@@ -591,12 +593,11 @@ describe('the owner card', () => {
     );
     const lists = facts.find((fact) => fact.label === 'Import lists');
 
-    expect(lists?.value).toBe('1 list adds here, 2 below');
+    expect(lists?.value).toBe('1 list adds here, 2 more');
     expect(lists?.detail).toEqual([
       'Trakt watchlist - adds automatically',
-      // Prefixed with the folder it fills, said relative to the one being read.
-      'tv: Series watchlist - manual add',
-      'tv: Stalled - disabled',
+      'Series watchlist - manual add',
+      'Stalled - disabled',
     ]);
   });
 
@@ -624,15 +625,15 @@ describe('the owner card', () => {
     });
   });
 
-  it('reports the free space the instance sees, which is not this container statfs', () => {
-    const facts = ownerFacts(owner(1, 'rootFolder'), '/data/media/movies');
-    const root = facts.find((fact) => fact.label === 'Root folder');
+  it('says how the instance uses the folder, not a Root folder section with free space', () => {
+    const rooted = ownerFacts(owner(1, 'rootFolder'), '/data/media/movies');
+    expect(rooted[0]).toMatchObject({ label: 'Used as', value: 'root folder' });
+    expect(rooted.some((fact) => fact.label === 'Root folder')).toBe(false);
 
-    expect(root?.value).toBe('here');
-    expect(root?.detail[0]).toContain('as this instance sees it');
-    // A folder nobody roots at has no root folder fact at all.
-    expect(ownerFacts(owner(1, 'ancestor'), '/data/media').some((f) => f.label === 'Root folder')).toBe(
-      false,
+    const parent = ownerFacts(
+      owner(1, 'containsRoot', { rootFoldersUnder: ['/data/media/tv'] }),
+      '/data/media',
     );
+    expect(parent[0]).toMatchObject({ label: 'Used for', value: '1 root folder below' });
   });
 });

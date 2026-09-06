@@ -432,13 +432,6 @@ environment:
           </BaseButton>
           <BaseButton
             size="sm"
-            variant="primary"
-            @click="adding = { path: '', paths: [], preselect: [] }"
-          >
-            Add root folder…
-          </BaseButton>
-          <BaseButton
-            size="sm"
             variant="success"
             :disabled="rootable.length === 0"
             :title="
@@ -448,7 +441,7 @@ environment:
             "
             @click="adding = { path: '', paths: rootable.map((node) => node.path), preselect: [] }"
           >
-            Add root folder here… ({{ rootable.length }})
+            Assign ({{ rootable.length }})
           </BaseButton>
           <BaseButton
             size="sm"
@@ -457,11 +450,11 @@ environment:
             :title="
               deletable.length === 0
                 ? 'Select folders an instance roots at'
-                : `Remove ${deletable.length} root folder(s) from the instances that own them`
+                : `Unassign ${deletable.length} root folder(s) from the instances that own them`
             "
             @click="removing = deletable"
           >
-            Remove root folder… ({{ deletable.length }})
+            Unassign ({{ deletable.length }})
           </BaseButton>
         </div>
       </div>
@@ -562,6 +555,8 @@ environment:
                       "
                       @change="toggleAll()"
                     />
+                    <!-- Same width as the row twisty, so "Path" lines up with depth-0 names. -->
+                    <span v-if="!paths.flatView" class="w-4 shrink-0" aria-hidden="true"></span>
                     <span
                       title="A root folder is green. What is wrong with a folder is stated at the right of this column, next to the name it describes"
                     >
@@ -589,9 +584,6 @@ environment:
                   title="Free space on the filesystem this folder is on"
                 >
                   Free
-                </th>
-                <th class="border-b border-l border-line bg-raised px-2 py-2 text-right text-[11px] font-semibold text-muted">
-                  Row actions
                 </th>
               </tr>
             </thead>

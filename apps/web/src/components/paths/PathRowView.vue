@@ -1,13 +1,17 @@
 <script setup lang="ts">
 import { computed, type Component } from 'vue';
 import type { PathNode, PathSeverity, QueueItem } from '@arrranger/shared';
-import BaseButton from '@/components/base/BaseButton.vue';
 import IconCollapsed from '@/components/base/icons/IconCollapsed.vue';
+import IconCreate from '@/components/base/icons/IconCreate.vue';
+import IconDelete from '@/components/base/icons/IconDelete.vue';
+import IconEdit from '@/components/base/icons/IconEdit.vue';
 import IconError from '@/components/base/icons/IconError.vue';
 import IconExpanded from '@/components/base/icons/IconExpanded.vue';
 import IconFile from '@/components/base/icons/IconFile.vue';
 import IconFocus from '@/components/base/icons/IconFocus.vue';
 import IconLoading from '@/components/base/icons/IconLoading.vue';
+import IconMerge from '@/components/base/icons/IconMerge.vue';
+import IconMove from '@/components/base/icons/IconMove.vue';
 import IconSymlink from '@/components/base/icons/IconSymlink.vue';
 import IconWarning from '@/components/base/icons/IconWarning.vue';
 import PathFlagBadge from './PathFlagBadge.vue';
@@ -73,12 +77,21 @@ const ACTION_LABELS: Record<Exclude<PathAction, 'focus'>, string> = {
   remap: 're-map',
   rename: 'rename',
   move: 'move',
-  prune: 'prune',
+  prune: 'remove',
+};
+
+/** Every row action is an icon next to the name; the title is what names it. */
+const ACTION_ICONS: Record<Exclude<PathAction, 'focus'>, Component> = {
+  addRoot: IconCreate,
+  remap: IconMerge,
+  rename: IconEdit,
+  move: IconMove,
+  prune: IconDelete,
 };
 
 /**
  * `align` is not a button of its own any more - it is what a rename does when the folder is
- * somebody's root folder, chosen per instance inside the one dialog. The label still says
+ * somebody's root folder, chosen per instance inside the one dialog. The title still says
  * so, because the difference between the two renames is the whole point.
  */
 function labelFor(action: Exclude<PathAction, 'focus'>): string {
@@ -88,8 +101,17 @@ function labelFor(action: Exclude<PathAction, 'focus'>): string {
 }
 
 const allActions = computed(() => actionsFor(props.node));
-/** `focus` gets its own icon next to the name rather than a text button in the actions column. */
-const actions = computed(() => allActions.value.filter((action) => action !== 'focus'));
+/**
+ * Path-column actions. `addRoot` lives in Used by, after the owner chips, and only on a
+ * leaf - a parent with children under it is a place to look, not a place to attach a root.
+ */
+const actions = computed(() =>
+  allActions.value.filter(
+    (action): action is Exclude<PathAction, 'focus' | 'addRoot'> =>
+      action !== 'focus' && action !== 'addRoot',
+  ),
+);
+const canAddRoot = computed(() => props.selectable && allActions.value.includes('addRoot'));
 const canFocus = computed(() => !props.flat && allActions.value.includes('focus'));
 const intent = computed(() => stagedIntent(props.stagedForPath));
 const media = computed(() => mediaSummary(props.node));
@@ -152,9 +174,13 @@ const twistyIcon = computed<Component>(() => {
  */
 const twistyTitle = computed(() => {
   if (props.loading) return 'Reading…';
+  if (props.node.flags.includes('rootFolder')) return 'Root folders are not expanded here';
   if (!props.node.expandable) return 'Nothing to expand here';
   return props.expanded ? 'Collapse' : 'Expand';
 });
+
+/** A root folder is a leaf on purpose - the chevron stays, it just is not a control. */
+const rootFolderLeaf = computed(() => props.node.flags.includes('rootFolder'));
 
 /**
  * A top-level row is a mount or a root folder this container cannot see; either way the
@@ -199,6 +225,16 @@ const spaceTitle = computed(() => {
   const of = props.node.totalSpace === null ? '' : ` of ${formatBytes(props.node.totalSpace)}`;
   return `${formatBytes(props.node.freeSpace)} free${of}${share}${props.node.lowSpace ? ' - below the low-space threshold' : ''}`;
 });
+
+/**
+ * One tree step equals the twisty column (`w-4` = 1rem). The checkbox stays in a
+ * column of its own, so this padding is only the fold-and-name tree. A child's
+ * chevron sits exactly one column to the right of its parent's, and folder names
+ * at the same depth share a left edge.
+ */
+const treeIndent = computed(() =>
+  props.flat || props.depth === 0 ? undefined : { paddingLeft: `${String(props.depth)}rem` },
+);
 </script>
 
 <template>
@@ -212,15 +248,15 @@ const spaceTitle = computed(() => {
       class="sticky left-0 z-10 border-b border-line px-3 py-1.5 text-left font-normal"
       :class="selected ? 'bg-[#16202b]' : 'bg-surface'"
     >
-      <div class="flex items-center gap-1.5" :style="{ paddingLeft: `${String(depth * 0.9)}rem` }">
+      <div class="flex items-center gap-1.5">
         <BaseCheckbox
           v-if="selectable"
           :model-value="selected"
           :title="`Select ${node.path}`"
           @change="emit('select')"
         />
-        <!-- Alignment only: a parent has no checkbox, but its name still has to line up
-             with its children's. -->
+        <!-- Alignment only: a parent has no checkbox, but same-depth names still have
+             to line up with rows that do. -->
         <span
           v-else
           class="w-3.5 shrink-0"
@@ -228,78 +264,112 @@ const spaceTitle = computed(() => {
           data-testid="no-checkbox"
         ></span>
 
-        <template v-if="!flat">
-          <button
-            v-if="!node.flags.includes('rootFolder')"
-            type="button"
-            data-testid="path-twisty"
-            class="w-4 shrink-0 text-left transition-colors hover:text-ink disabled:opacity-30"
-            :class="loading ? 'animate-spin text-accent' : 'text-faint'"
-            :disabled="!node.expandable || loading"
-            :title="twistyTitle"
-            :aria-label="twistyTitle"
-            @click="emit('toggle')"
+        <div
+          data-testid="path-tree"
+          class="flex min-w-0 flex-1 items-center gap-1.5"
+          :style="treeIndent"
+        >
+          <div class="flex min-w-0 flex-1 items-center gap-1.5">
+            <template v-if="!flat">
+              <button
+                v-if="!rootFolderLeaf"
+                type="button"
+                data-testid="path-twisty"
+                class="flex w-4 shrink-0 items-center justify-center transition-colors hover:text-ink disabled:opacity-30"
+                :class="loading ? 'animate-spin text-accent' : 'text-faint'"
+                :disabled="!node.expandable || loading"
+                :title="twistyTitle"
+                :aria-label="twistyTitle"
+                @click="emit('toggle')"
+              >
+                <component :is="twistyIcon" size="sm" />
+              </button>
+              <span
+                v-else
+                data-testid="path-twisty"
+                class="flex w-4 shrink-0 items-center justify-center text-faint/40"
+                :title="twistyTitle"
+              >
+                <IconCollapsed size="sm" />
+              </span>
+            </template>
+
+            <span
+              data-name
+              class="min-w-0 truncate font-mono"
+              :class="nameClasses"
+              :title="diskTitle"
+            >
+              {{ label }}
+            </span>
+
+            <!-- Staged work and the glyph stay by the name. Word badges sit after the
+                 row actions, at the right of the Path column, so `empty` does not sit
+                 between the folder and the buttons that act on it. -->
+            <span
+              v-if="intent"
+              class="shrink-0 rounded border px-1.5 py-0.5 text-[10px]"
+              :class="TONE_CLASSES[intent.tone]"
+              :title="`${intent.label} is staged for this folder`"
+            >
+              <component :is="intent.icon" size="xs" /> staged
+            </span>
+
+            <span
+              v-if="severity"
+              class="flex w-4 shrink-0 justify-end text-[11px]"
+              :class="severity.classes"
+              :title="severityTitle"
+              data-severity="own"
+            >
+              <component :is="severity.icon" />
+            </span>
+            <span
+              v-else-if="inheritedSeverity"
+              class="flex w-4 shrink-0 justify-end text-[11px] opacity-40"
+              :class="inheritedSeverity.classes"
+              title="Something inside this folder needs attention"
+              data-severity="child"
+            >
+              <component :is="inheritedSeverity.icon" />
+            </span>
+          </div>
+
+          <span
+            v-if="actions.length > 0"
+            class="inline-flex shrink-0 items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100"
           >
-            <component :is="twistyIcon" size="sm" />
+            <button
+              v-for="action in actions"
+              :key="action"
+              type="button"
+              class="shrink-0 text-[11px] text-faint transition-colors disabled:opacity-30"
+              :class="action === 'prune' ? 'hover:text-danger' : 'hover:text-accent'"
+              :disabled="busy"
+              :title="labelFor(action)"
+              :aria-label="labelFor(action)"
+              :data-action="action"
+              @click="emit('action', action)"
+            >
+              <component :is="ACTION_ICONS[action]" size="lg" />
+            </button>
+          </span>
+
+          <button
+            v-if="canFocus"
+            type="button"
+            data-testid="path-focus"
+            class="shrink-0 text-[11px] text-faint transition-colors hover:text-accent"
+            title="Focus: re-root this view at this folder"
+            aria-label="Focus this folder"
+            :disabled="busy"
+            @click="emit('action', 'focus')"
+          >
+            <IconFocus />
           </button>
-          <span v-else class="w-4 shrink-0"></span>
-        </template>
 
-        <span
-          data-name
-          class="min-w-0 flex-1 truncate font-mono"
-          :class="nameClasses"
-          :title="diskTitle"
-        >
-          {{ label }}
-        </span>
-
-        <button
-          v-if="canFocus"
-          type="button"
-          data-testid="path-focus"
-          class="shrink-0 text-[11px] text-faint transition-colors hover:text-accent"
-          title="Focus: re-root this view at this folder"
-          aria-label="Focus this folder"
-          :disabled="busy"
-          @click="emit('action', 'focus')"
-        >
-          <IconFocus />
-        </button>
-
-        <!-- What is wrong with this folder, right where its name is, and in one reading
-             order: the states, then anything staged against them, then the glyph that
-             summarises the lot. The old State column put all three a full table away
-             from the name they describe. -->
-        <PathFlagBadge v-for="flag in badges" :key="flag" :flag="flag" class="shrink-0" />
-
-        <span
-          v-if="intent"
-          class="shrink-0 rounded border px-1.5 py-0.5 text-[10px]"
-          :class="TONE_CLASSES[intent.tone]"
-          :title="`${intent.label} is staged for this folder`"
-        >
-          <component :is="intent.icon" size="xs" /> staged
-        </span>
-
-        <span
-          v-if="severity"
-          class="flex w-4 shrink-0 justify-end text-[11px]"
-          :class="severity.classes"
-          :title="severityTitle"
-          data-severity="own"
-        >
-          <component :is="severity.icon" />
-        </span>
-        <span
-          v-else-if="inheritedSeverity"
-          class="flex w-4 shrink-0 justify-end text-[11px] opacity-40"
-          :class="inheritedSeverity.classes"
-          title="Something inside this folder needs attention"
-          data-severity="child"
-        >
-          <component :is="inheritedSeverity.icon" />
-        </span>
+          <PathFlagBadge v-for="flag in badges" :key="flag" :flag="flag" class="shrink-0" />
+        </div>
       </div>
     </th>
 
@@ -308,6 +378,9 @@ const spaceTitle = computed(() => {
       :path="node.path"
       :unknown-count="unknownCount"
       :staged="stagedForCell"
+      :can-add-root="canAddRoot"
+      :busy="busy"
+      @add-root="emit('action', 'addRoot')"
       @remove="emit('ownerRemove', $event)"
     />
 
@@ -344,21 +417,6 @@ const spaceTitle = computed(() => {
     >
       <IconWarning v-if="node.lowSpace" data-low-space="true" class="mr-0.5" />
       {{ node.freeSpace === null ? '—' : formatBytes(node.freeSpace) }}
-    </td>
-
-    <td class="border-b border-l border-line px-2 py-1.5 text-right whitespace-nowrap">
-      <span class="inline-flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-        <BaseButton
-          v-for="action in actions"
-          :key="action"
-          size="sm"
-          variant="ghost"
-          :disabled="busy"
-          @click="emit('action', action)"
-        >
-          {{ labelFor(action) }}
-        </BaseButton>
-      </span>
     </td>
   </tr>
 </template>

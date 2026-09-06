@@ -223,12 +223,6 @@ export const PATH_FLAGS = [
   'mount',
   /** A root folder on at least one reachable instance. */
   'rootFolder',
-  /**
-   * A library-shaped folder - a sibling of a root folder, or one holding media - that
-   * no instance uses as a root folder. The direct answer to "which folders are not
-   * used as root folders".
-   */
-  'candidate',
   /** Inside someone's root folder, and nothing is tracked at or under it. */
   'untracked',
   /** Holds media, but sits under no root folder anywhere. */
@@ -266,7 +260,6 @@ export interface PathRollup {
    *  downloaded item is not counted: its path is meant not to exist. */
   readonly missing: number;
   readonly rootFolders: number;
-  readonly candidates: number;
   readonly symlinks: number;
   readonly empty: number | null;
   readonly unreadable: number | null;
@@ -342,7 +335,6 @@ export const PATH_SELECTORS = [
   'all',
   'problems',
   'rootFolders',
-  'candidates',
   'tracked',
   'untracked',
   'missing',
@@ -400,7 +392,7 @@ export interface PathMatrixColumn {
  * Fleet counters.
  *
  * `rootFolderPaths`, `unseenRootFolders` and `unmanaged` are exact: they come from the
- * *Arr index and need no disk access. The other three describe the
+ * *Arr index and need no disk access. `untracked` and `missing` describe the
  * levels in *this* response, because counting them fleet-wide would mean walking every
  * library - the one thing this design exists to avoid. The overview always reads the
  * whole spine, so on a first load they cover every mount and root folder.
@@ -414,8 +406,6 @@ export interface PathMatrixTotals {
   readonly untracked: number;
   /** *Arr paths that are not on disk. */
   readonly missing: number;
-  /** Directories sitting alongside root folders that are not root folders themselves. */
-  readonly candidates: number;
 }
 
 export interface PathMatrixResponse {

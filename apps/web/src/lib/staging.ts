@@ -26,7 +26,7 @@ const PRESENTATION: Record<QueueOp, OpPresentation> = {
   'mediaTags.add': { icon: IconCreate, label: 'Add tags to media', tone: 'update' },
   'mediaTags.remove': { icon: IconRemove, label: 'Remove tags from media', tone: 'update' },
   'rootFolder.create': { icon: IconCreate, label: 'Add root folder', tone: 'create' },
-  'rootFolder.delete': { icon: IconDelete, label: 'Remove root folder', tone: 'destroy' },
+  'rootFolder.delete': { icon: IconDelete, label: 'Unassign root folder', tone: 'destroy' },
   'media.moveRootFolder': { icon: IconMove, label: 'Move to root folder', tone: 'move' },
   'importList.update': { icon: IconEdit, label: 'Update import list', tone: 'update' },
   'importList.delete': { icon: IconDelete, label: 'Delete import list', tone: 'destroy' },

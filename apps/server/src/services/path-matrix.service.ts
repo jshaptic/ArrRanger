@@ -237,10 +237,7 @@ export class PathMatrixService {
     query: PathMatrixQuery,
     context: { error: string | null },
   ): Promise<PathMatrixLevel> {
-    // "Sits alongside a root folder" is a fact about the level, not the child, so it is
-    // established once here and threaded through selection, flags and the rollup alike.
-    const scope = { levelHasRootFolder: candidates.some((entry) => entry.isRootFolder) };
-    const rollup = rollupOf(candidates, ctx.indexes, levelPath, scope);
+    const rollup = rollupOf(candidates, ctx.indexes, levelPath);
 
     // Small levels behave exactly like the old explorer: everything, fully probed.
     const small = candidates.length <= FULL_LEVEL_ENTRIES;
@@ -259,7 +256,7 @@ export class PathMatrixService {
       const navigable = (levelPath === null && candidate.inScope) || candidate.containsRootFolder;
       if (!passesPathFilter(ctx.filter, candidate.path, { navigable })) return false;
       if (ctx.scoped && !inScopedTree(candidate)) return false;
-      return selectors.some((selector) => matchesSelector(candidate, selector, scope));
+      return selectors.some((selector) => matchesSelector(candidate, selector));
     });
 
     const sorted = sortCandidates(matched, query.sort ?? 'name');
@@ -268,7 +265,7 @@ export class PathMatrixService {
     const page = sorted.slice(offset, offset + limit);
 
     const nodes = await Promise.all(
-      page.map((candidate) => this.enrich(candidate, ctx, { probe: wantsProbe, ...scope })),
+      page.map((candidate) => this.enrich(candidate, ctx, { probe: wantsProbe })),
     );
 
     return {
@@ -388,9 +385,9 @@ export class PathMatrixService {
   private async enrich(
     candidate: Candidate,
     ctx: LevelContext,
-    options: { probe: boolean; levelHasRootFolder: boolean },
+    options: { probe: boolean },
   ): Promise<PathNode> {
-    const base = this.baseNode(candidate, ctx, options);
+    const base = this.baseNode(candidate, ctx);
     if (!candidate.exists || !candidate.inScope || !options.probe) return base;
 
     // Counting a root folder's children means reading a directory with hundreds of media
@@ -410,7 +407,7 @@ export class PathMatrixService {
     // request, and none at all when every row sits on the mount that seeded it.
     const space = await ctx.space.forDevice(stats.deviceId, candidate.path);
 
-    const flags = this.flagsFor(candidate, { childCount, readable, writable }, options);
+    const flags = this.flagsFor(candidate, { childCount, readable, writable });
     const lowSpace = this.lowSpaceFor(candidate, space);
 
     return {
@@ -434,14 +431,13 @@ export class PathMatrixService {
   private baseNode(
     candidate: Candidate,
     ctx: LevelContext,
-    scope: { levelHasRootFolder: boolean },
   ): PathNode {
     // Not probed, so there is no device id yet: inherit the containing mount's numbers.
     // A nested bind-mount below a mount therefore reports the outer filesystem until the
     // row is probed - honest for the spine, which is always probed.
     const space = this.mountSpaceFor(candidate.path);
     const owners = this.ownersFor(candidate, ctx.indexes);
-    const flags = this.flagsFor(candidate, { childCount: null, readable: true, writable: true }, scope);
+    const flags = this.flagsFor(candidate, { childCount: null, readable: true, writable: true });
     const lowSpace = this.lowSpaceFor(candidate, space);
 
     return {
@@ -570,7 +566,6 @@ export class PathMatrixService {
   private flagsFor(
     candidate: Candidate,
     probe: { childCount: number | null; readable: boolean; writable: boolean },
-    scope: { levelHasRootFolder: boolean },
   ): readonly PathFlag[] {
     const flags: PathFlag[] = [];
 
@@ -581,7 +576,6 @@ export class PathMatrixService {
     else if (!candidate.exists) flags.push('missing');
 
     if (candidate.exists && candidate.inScope && candidate.kind !== 'file') {
-      if (isCandidate(candidate, scope.levelHasRootFolder)) flags.push('candidate');
       if (!candidate.isRootFolder && candidate.insideRootFolder && candidate.mediaUnder === 0) {
         flags.push('untracked');
       }
@@ -714,7 +708,6 @@ export class PathMatrixService {
       untracked: sum((rollup) => rollup.untracked),
       missing: sum((rollup) => rollup.missing),
       unmanaged: unmanaged.size,
-      candidates: sum((rollup) => rollup.candidates),
     };
   }
 }
@@ -758,8 +751,8 @@ class SpaceResolver {
  *
  * `untracked` is deliberately only `info`: it fires on every non-media folder inside a
  * root folder, so promoting it would paint a healthy library amber and destroy the signal
- * the two `warn` flags carry. `candidate` and `unmanaged` are the questions this view
- * exists to answer, so they are what `warn` means here.
+ * `unmanaged` carries. That is the question this view exists to answer, so it is what
+ * `warn` means here.
  */
 export function severityOf(
   flags: readonly PathFlag[],
@@ -769,7 +762,7 @@ export function severityOf(
   const has = (flag: PathFlag): boolean => flags.includes(flag);
 
   if (has('unseen') || has('missing') || has('unreadable')) return 'error';
-  if (has('candidate') || has('unmanaged') || has('readOnly') || lowSpace) return 'warn';
+  if (has('unmanaged') || has('readOnly') || lowSpace) return 'warn';
   if (owners.some((owner) => owner.use === 'rootFolder' && owner.accessible === false)) return 'warn';
   if (has('untracked') || has('empty') || has('symlink')) return 'info';
   return 'ok';
@@ -829,23 +822,10 @@ async function countChildren(target: string): Promise<number | null> {
   }
 }
 
-/** A directory sitting alongside root folders that is not one - the headline signal. */
-function isCandidate(candidate: Candidate, levelHasRootFolder: boolean): boolean {
-  return (
-    candidate.exists &&
-    candidate.inScope &&
-    candidate.kind === 'directory' &&
-    !candidate.isRootFolder &&
-    !candidate.insideRootFolder &&
-    levelHasRootFolder
-  );
-}
-
 function rollupOf(
   candidates: readonly Candidate[],
   indexes: readonly InstancePathIndex[],
   levelPath: string | null,
-  scope: { levelHasRootFolder: boolean },
 ): PathRollup {
   const folders = candidates.filter((candidate) => candidate.kind !== 'file');
 
@@ -873,14 +853,11 @@ function rollupOf(
     ).length,
     missing: candidates.filter((candidate) => !candidate.exists && candidate.inScope).length,
     rootFolders: candidates.filter((candidate) => candidate.isRootFolder).length,
-
-    candidates: folders.filter((candidate) => isCandidate(candidate, scope.levelHasRootFolder))
-      .length,
     symlinks: candidates.filter((candidate) => candidate.kind === 'symlink').length,
     empty: null,
     unreadable: null,
     mediaUnder,
-    severity: levelSeverityOf(candidates, scope),
+    severity: levelSeverityOf(candidates),
   };
 }
 
@@ -894,7 +871,6 @@ function rollupOf(
  */
 function levelSeverityOf(
   candidates: readonly Candidate[],
-  scope: { levelHasRootFolder: boolean },
 ): PathSeverity {
   let severity: PathSeverity = 'ok';
 
@@ -908,7 +884,7 @@ function levelSeverityOf(
       !candidate.insideRootFolder &&
       !candidate.containsRootFolder;
 
-    if (isCandidate(candidate, scope.levelHasRootFolder) || unmanaged) {
+    if (unmanaged) {
       severity = 'warn';
       continue;
     }
@@ -925,7 +901,6 @@ function levelSeverityOf(
 function matchesSelector(
   candidate: Candidate,
   selector: PathSelector,
-  scope: { levelHasRootFolder: boolean },
 ): boolean {
   switch (selector) {
     case 'all':
@@ -939,8 +914,6 @@ function matchesSelector(
       );
     case 'rootFolders':
       return candidate.isRootFolder;
-    case 'candidates':
-      return isCandidate(candidate, scope.levelHasRootFolder);
     case 'tracked':
       return candidate.mediaUnder > 0;
     case 'untracked':
@@ -989,6 +962,5 @@ function emptyTotals(): PathMatrixTotals {
     untracked: 0,
     missing: 0,
     unmanaged: 0,
-    candidates: 0,
   };
 }

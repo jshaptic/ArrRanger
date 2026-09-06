@@ -26,7 +26,7 @@ async function confirm(): Promise<void> {
 
 <template>
   <BaseModal
-    title="Remove root folder(s) across the fleet"
+    title="Unassign root folder(s) across the fleet"
     :subtitle="`${props.targets.length} operation(s) on ${paths.length} distinct path(s)`"
     @close="emit('close')"
   >
@@ -43,7 +43,7 @@ async function confirm(): Promise<void> {
       </ul>
 
       <p class="rounded-md border border-drift/40 bg-drift/5 px-3 py-2 text-[11px] leading-relaxed text-drift">
-        <IconWarning /> This only removes the root folder entry on each instance - it stops offering the path
+        <IconWarning /> This only unassigns the root folder entry on each instance - it stops offering the path
         for new imports, but does not touch files on disk or media already assigned to it. If
         anything still points here, re-map it first instead of deleting the folder out from
         under it.
@@ -53,7 +53,7 @@ async function confirm(): Promise<void> {
     <template #footer>
       <BaseButton variant="ghost" @click="emit('close')">Cancel</BaseButton>
       <BaseButton variant="danger" :loading="queue.busy" @click="confirm()">
-        Stage {{ props.targets.length }} removal(s)
+        Unassign {{ props.targets.length }} root folder(s)
       </BaseButton>
     </template>
   </BaseModal>
