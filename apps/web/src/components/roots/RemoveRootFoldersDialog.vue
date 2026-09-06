@@ -4,6 +4,7 @@ import BaseButton from '@/components/base/BaseButton.vue';
 import BaseModal from '@/components/base/BaseModal.vue';
 import { useInstancesStore } from '@/stores/instances';
 import { useQueueStore, type RootFolderTarget } from '@/stores/queue';
+import IconWarning from '@/components/base/icons/IconWarning.vue';
 
 const props = defineProps<{ targets: readonly RootFolderTarget[] }>();
 const emit = defineEmits<{ close: [] }>();
@@ -42,7 +43,7 @@ async function confirm(): Promise<void> {
       </ul>
 
       <p class="rounded-md border border-drift/40 bg-drift/5 px-3 py-2 text-[11px] leading-relaxed text-drift">
-        ⚠ This only removes the root folder entry on each instance - it stops offering the path
+        <IconWarning /> This only removes the root folder entry on each instance - it stops offering the path
         for new imports, but does not touch files on disk or media already assigned to it. If
         anything still points here, re-map it first instead of deleting the folder out from
         under it.

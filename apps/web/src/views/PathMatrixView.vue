@@ -25,6 +25,12 @@ import {
 import { useMatrixStore } from '@/stores/matrix';
 import { usePathsStore } from '@/stores/paths';
 import { useQueueStore, type RootFolderTarget } from '@/stores/queue';
+import IconStorage from '@/components/base/icons/IconStorage.vue';
+import IconSearch from '@/components/base/icons/IconSearch.vue';
+import IconFolderOpen from '@/components/base/icons/IconFolderOpen.vue';
+import IconBack from '@/components/base/icons/IconBack.vue';
+import IconWarning from '@/components/base/icons/IconWarning.vue';
+import BaseCheckbox from '@/components/base/BaseCheckbox.vue';
 
 const paths = usePathsStore();
 const queue = useQueueStore();
@@ -288,7 +294,7 @@ onMounted(async () => {
       v-if="!paths.enabled && !paths.loading"
       title="Filesystem access is off"
       description="ArrRanger can inspect and reorganise media folders once it can see them. Mount your media at the same path the *Arr containers use, then set FS_ROOTS."
-      icon="🗃"
+      :icon="IconStorage"
     >
       <pre class="mt-1 overflow-x-auto rounded-md border border-line bg-raised px-3 py-2 text-left font-mono text-[11px] text-muted">volumes:
   - /mnt/user/data:/data:rw    # the same path Radarr/Sonarr see
@@ -306,7 +312,7 @@ environment:
         class="rounded-lg border border-drift/40 bg-drift/5 px-4 py-3"
       >
         <h2 class="mb-2 text-sm font-semibold text-drift">
-          ⚠ {{ paths.mismatches.length }} instance(s) describe paths this container cannot see
+          <IconWarning size="xl" /> {{ paths.mismatches.length }} instance(s) describe paths this container cannot see
         </h2>
         <ul class="space-y-2 text-[11px]">
           <li v-for="mismatch in paths.mismatches" :key="mismatch.instanceId">
@@ -463,7 +469,7 @@ environment:
       <!-- focus breadcrumb -->
       <nav v-if="paths.focus" class="flex flex-wrap items-center gap-1 text-[11px] text-muted">
         <BaseButton size="sm" variant="ghost" @click="paths.clearFocus()">
-          ← back to mounts
+          <IconBack size="sm" /> back to mounts
         </BaseButton>
         <template v-for="(crumb, index) in crumbs" :key="crumb.path">
           <span v-if="index > 0" class="text-faint">/</span>
@@ -511,7 +517,7 @@ environment:
             ? `All ${paths.parsedFilter.patterns.length} pattern(s) together hide everything in view.`
             : `${paths.parsedFilter.patterns.length} pattern(s), none of them naming a folder in view. Patterns match whole folder names once they contain a “/” - “movies/4k”, not “movies/4”.`
         "
-        icon="🔍"
+        :icon="IconSearch"
       >
         <BaseButton size="sm" @click="paths.setFilter('')">Clear the filter</BaseButton>
       </EmptyState>
@@ -520,7 +526,7 @@ environment:
         v-else-if="paths.rows.length === 0"
         title="Nothing to show"
         description="Root folders come from each instance, folders come from the mounts in FS_ROOTS. If both are empty, add an instance or check your mounts."
-        icon="🗄"
+        :icon="IconFolderOpen"
       />
 
       <div v-else class="space-y-2">
@@ -541,11 +547,9 @@ environment:
                   class="sticky left-0 z-20 min-w-[24rem] border-b border-line bg-raised px-3 py-2 text-left text-[11px] font-semibold text-muted"
                 >
                   <span class="flex items-center gap-1.5">
-                    <input
-                      type="checkbox"
-                      class="accent-[var(--color-accent)] disabled:opacity-30"
+                    <BaseCheckbox
                       data-testid="select-all"
-                      :checked="allSelected"
+                      :model-value="allSelected"
                       :indeterminate="someSelected"
                       :disabled="selectableRows.length === 0"
                       :aria-label="allSelected ? 'Deselect every row in the table' : 'Select every row in the table'"

@@ -8,6 +8,9 @@ import { formatRelativeTime, initialsOf } from '@/lib/format';
 import { useInstancesStore } from '@/stores/instances';
 import { useMatrixStore } from '@/stores/matrix';
 import { useUiStore } from '@/stores/ui';
+import IconInstance from '@/components/base/icons/IconInstance.vue';
+import IconUnknown from '@/components/base/icons/IconUnknown.vue';
+import IconWarning from '@/components/base/icons/IconWarning.vue';
 
 const instances = useInstancesStore();
 const matrix = useMatrixStore();
@@ -82,7 +85,7 @@ onMounted(() => {
       v-if="sorted.length === 0"
       title="No instances yet"
       description="ArrRanger works across the whole fleet at once. Connect every Radarr and Sonarr you run - the comparison views only get useful with two or more."
-      icon="🔌"
+      :icon="IconInstance"
     >
       <BaseButton variant="primary" size="sm" @click="editing = null">Connect an instance</BaseButton>
     </EmptyState>
@@ -125,8 +128,12 @@ onMounted(() => {
             </td>
             <td class="px-3 py-2 font-mono text-[11px] text-muted">
               {{ instance.baseUrl }}
-              <span v-if="!instance.verifySsl" class="ml-1 text-drift" title="TLS verification is off">
-                ⚠ no TLS check
+              <span
+                v-if="!instance.verifySsl"
+                class="ml-1 inline-flex items-center gap-0.5 text-drift"
+                title="TLS verification is off"
+              >
+                <IconWarning /> no TLS check
               </span>
             </td>
             <td class="px-3 py-2 font-mono text-[11px] text-muted">
@@ -167,7 +174,8 @@ onMounted(() => {
 
     <p v-if="instances.unreachable.length > 0" class="text-[11px] leading-relaxed text-muted">
       Unreachable instances stay in the fleet: their matrix columns show
-      <span class="font-mono">?</span> rather than "missing", so a temporary outage never looks like
+      <IconUnknown size="xs" /><span class="sr-only">unknown</span> rather than "missing", so a temporary
+      outage never looks like
       a configuration gap - and batch actions skip them.
     </p>
 

@@ -14,6 +14,8 @@ import RenameTagsDialog from '@/components/tags/RenameTagsDialog.vue';
 import type { TagMatrixRow } from '@/lib/matrix';
 import { useMatrixStore } from '@/stores/matrix';
 import { useQueueStore, type TagTarget } from '@/stores/queue';
+import IconTag from '@/components/base/icons/IconTag.vue';
+import BaseCheckbox from '@/components/base/BaseCheckbox.vue';
 
 type Filter = 'all' | 'drift' | 'unused';
 
@@ -51,6 +53,15 @@ const selectedRows = computed(() =>
 
 const allVisibleSelected = computed(
   () => rows.value.length > 0 && selectedRows.value.length === rows.value.length,
+);
+
+/**
+ * The header's third state. An empty box sitting above three ticked rows reads as a bug
+ * now that the box is drawn rather than native - the unfilled system tick was quietly
+ * wrong about the same thing. What clicking it does is unchanged: still all-or-nothing.
+ */
+const someVisibleSelected = computed(
+  () => !allVisibleSelected.value && selectedRows.value.length > 0,
 );
 
 /** Instances a batch action may touch: the fleet, or the explicit selection. */
@@ -201,7 +212,7 @@ onMounted(() => {
       v-if="matrix.columns.length === 0"
       title="No instances connected"
       description="ArrRanger compares tags across every connected Radarr and Sonarr. Add at least one instance to see the parity matrix."
-      icon="🗂"
+      :icon="IconTag"
     >
       <RouterLink to="/instances">
         <BaseButton variant="primary" size="sm">Connect an instance</BaseButton>
@@ -228,10 +239,9 @@ onMounted(() => {
               class="sticky left-0 z-20 min-w-[16rem] border-b border-line bg-raised px-3 py-2 text-left"
             >
               <label class="flex items-center gap-2 text-[11px] font-semibold text-muted">
-                <input
-                  type="checkbox"
-                  :checked="allVisibleSelected"
-                  class="accent-[var(--color-accent)]"
+                <BaseCheckbox
+                  :model-value="allVisibleSelected"
+                  :indeterminate="someVisibleSelected"
                   @change="toggleAllVisible()"
                 />
                 Tag ({{ rows.length }})
@@ -258,13 +268,11 @@ onMounted(() => {
               :class="selectedLabels.includes(row.label) ? 'bg-[#16202b]' : 'bg-surface'"
             >
               <label class="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  :checked="selectedLabels.includes(row.label)"
-                  class="accent-[var(--color-accent)]"
+                <BaseCheckbox
+                  :model-value="selectedLabels.includes(row.label)"
                   @change="toggleRow(row.label)"
                 />
-                <span class="min-w-0 flex-1 truncate font-mono text-ink" :title="row.label">
+                <span data-name class="min-w-0 flex-1 truncate font-mono text-ink" :title="row.label">
                   {{ row.label }}
                 </span>
                 <ParityBadge

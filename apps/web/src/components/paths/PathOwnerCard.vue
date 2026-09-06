@@ -124,7 +124,7 @@ onBeforeUnmount(() => {
       class="mt-2 rounded border px-1.5 py-0.5 text-[10px]"
       :class="TONE_CLASSES[staged.tone]"
     >
-      {{ staged.icon }} {{ staged.label }} staged for this folder
+      <component :is="staged.icon" size="xs" /> {{ staged.label }} staged for this folder
     </p>
 
     <dl class="mt-2 space-y-1.5 border-t border-line pt-2">

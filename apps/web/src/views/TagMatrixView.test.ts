@@ -152,7 +152,7 @@ describe('TagMatrixView', () => {
 
     const rows = wrapper.findAll('tbody tr');
     expect(rows).toHaveLength(3);
-    expect(rows.map((row) => row.find('th span').text())).toEqual(['4k-remux', 'anime', 'hd']);
+    expect(rows.map((row) => row.find('th [data-name]').text())).toEqual(['4k-remux', 'anime', 'hd']);
   });
 
   it('shows media counts where a tag exists and a gap where it does not', async () => {
@@ -163,7 +163,7 @@ describe('TagMatrixView', () => {
     expect(cells).toHaveLength(3);
     expect(cells[0]?.text()).toContain('2'); // Radarr-4K: two movies tagged
     expect(cells[1]?.text()).toContain('1'); // Radarr-HD: one movie
-    expect(cells[2]?.text()).toBe('—'); // Sonarr-Anime: missing
+    expect(cells[2]?.find('[data-icon="absent"]').exists()).toBe(true); // Sonarr-Anime: missing
   });
 
   it('reports parity per row', async () => {

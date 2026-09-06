@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue';
+import IconClose from '@/components/base/icons/IconClose.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -44,7 +45,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown));
             aria-label="Close"
             @click="emit('close')"
           >
-            ✕
+            <IconClose />
           </button>
         </header>
 

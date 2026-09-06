@@ -9,6 +9,8 @@ import StagedOperationRow from '@/components/staging/StagedOperationRow.vue';
 import { formatRelativeTime, initialsOf } from '@/lib/format';
 import { useQueueStore } from '@/stores/queue';
 import { useUiStore } from '@/stores/ui';
+import IconQueue from '@/components/base/icons/IconQueue.vue';
+import IconClose from '@/components/base/icons/IconClose.vue';
 
 const queue = useQueueStore();
 const ui = useUiStore();
@@ -97,7 +99,7 @@ onMounted(() => {
         v-if="queue.items.length === 0"
         title="The queue is empty"
         description="Stage changes from the Tag Parity Matrix or the Root Folder Topology view. Nothing reaches Radarr or Sonarr until you apply the queue."
-        icon="🧮"
+        :icon="IconQueue"
       />
 
       <ul v-else-if="grouping === 'sequence'" class="space-y-1.5">
@@ -236,9 +238,10 @@ onMounted(() => {
             <button
               type="button"
               class="rounded-md px-2 py-1 text-muted hover:bg-raised hover:text-ink"
+              aria-label="Close"
               @click="detail = null"
             >
-              ✕
+              <IconClose />
             </button>
           </header>
           <div class="max-h-[70vh] space-y-2 overflow-y-auto px-5 py-4">

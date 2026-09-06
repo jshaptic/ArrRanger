@@ -2,6 +2,7 @@
 import { initialsOf } from '@/lib/format';
 import type { InstanceSnapshot } from '@/lib/matrix';
 import { useMatrixStore } from '@/stores/matrix';
+import IconCheck from '@/components/base/icons/IconCheck.vue';
 
 defineProps<{ column: InstanceSnapshot }>();
 
@@ -43,7 +44,7 @@ const matrix = useMatrixStore();
             : 'border-line-strong text-transparent'
         "
       >
-        ✓
+        <IconCheck size="xs" />
       </span>
     </button>
   </th>

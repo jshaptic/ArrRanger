@@ -6,6 +6,13 @@ import BaseModal from '@/components/base/BaseModal.vue';
 import { planNewFolders } from '@/lib/new-folders';
 import { usePathsStore } from '@/stores/paths';
 import { useQueueStore } from '@/stores/queue';
+import IconCheck from '@/components/base/icons/IconCheck.vue';
+import IconCreate from '@/components/base/icons/IconCreate.vue';
+import IconDropdown from '@/components/base/icons/IconDropdown.vue';
+import IconError from '@/components/base/icons/IconError.vue';
+import IconSkip from '@/components/base/icons/IconSkip.vue';
+import IconWarning from '@/components/base/icons/IconWarning.vue';
+import BaseCheckbox from '@/components/base/BaseCheckbox.vue';
 
 /**
  * One box for every folder about to exist.
@@ -293,9 +300,10 @@ async function stage(): Promise<void> {
           :aria-expanded="open"
           :title="`Pick from the ${fs.knownDirectories.length} folder(s) this view has read`"
           data-testid="new-folders-parent-toggle"
+          aria-label="Browse the folders this view has read"
           @mousedown.prevent="openPicker"
         >
-          ▾
+          <IconDropdown size="sm" />
         </button>
 
         <ul
@@ -357,7 +365,7 @@ async function stage(): Promise<void> {
           class="mt-1 text-[11px] text-danger"
           data-testid="new-folders-error"
         >
-          ⚠ {{ plan.error }} - nothing will be created
+          <IconWarning /> {{ plan.error }} - nothing will be created
         </p>
       </div>
 
@@ -382,7 +390,7 @@ async function stage(): Promise<void> {
       </div>
 
       <label class="flex items-start gap-2 text-xs text-muted">
-        <input v-model="recursive" type="checkbox" class="mt-0.5 accent-[var(--color-accent)]" />
+        <BaseCheckbox v-model="recursive" class="mt-0.5" />
         <span>
           <span class="font-medium text-ink">Create parent directories as needed</span>
           <span class="block text-[11px]">
@@ -429,11 +437,14 @@ async function stage(): Promise<void> {
                   : 'text-muted'
             "
           >
-            <span class="w-3 shrink-0">
-              <template v-if="existing.includes(target)">{{ skipExisting ? '·' : '✕' }}</template>
-              <template v-else-if="blockersOf(target).length > 0">✕</template>
-              <template v-else-if="checks.has(target)">✓</template>
-              <template v-else>+</template>
+            <span class="flex w-3 shrink-0 items-center">
+              <template v-if="existing.includes(target)">
+                <IconSkip size="xs" v-if="skipExisting" />
+                <IconError v-else />
+              </template>
+              <IconError v-else-if="blockersOf(target).length > 0" />
+              <IconCheck size="xs" v-else-if="checks.has(target)" />
+              <IconCreate size="xs" v-else />
             </span>
             <span class="truncate" :title="blockersOf(target).join('; ') || target">
               {{ target }}
@@ -446,13 +457,13 @@ async function stage(): Promise<void> {
           class="mt-2 flex items-center gap-2 text-[11px] text-muted"
           data-testid="new-folders-skip-existing"
         >
-          <input v-model="skipExisting" type="checkbox" class="accent-[var(--color-accent)]" />
+          <BaseCheckbox v-model="skipExisting" />
           Skip the {{ existing.length }} that already exist
         </label>
 
         <ul v-if="blocked.length > 0" class="mt-2 space-y-1 text-[11px] text-danger">
           <li v-for="entry in blocked" :key="entry.path" class="flex gap-2">
-            <span>✕</span>
+            <IconError class="mt-0.5" />
             <span>
               <span class="font-mono">{{ entry.path }}</span> - {{ entry.reasons.join('; ') }}
             </span>
@@ -460,7 +471,7 @@ async function stage(): Promise<void> {
         </ul>
         <ul v-if="warnings.length > 0" class="mt-2 space-y-1 text-[11px] text-drift">
           <li v-for="message in warnings" :key="message" class="flex gap-2">
-            <span>⚠</span>
+            <IconWarning class="mt-0.5" />
             <span>{{ message }}</span>
           </li>
         </ul>

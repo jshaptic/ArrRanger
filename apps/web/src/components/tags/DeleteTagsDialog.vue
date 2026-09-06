@@ -5,6 +5,8 @@ import BaseModal from '@/components/base/BaseModal.vue';
 import { useInstancesStore } from '@/stores/instances';
 import { useMatrixStore } from '@/stores/matrix';
 import { useQueueStore, type TagTarget } from '@/stores/queue';
+import IconWarning from '@/components/base/icons/IconWarning.vue';
+import BaseCheckbox from '@/components/base/BaseCheckbox.vue';
 
 const props = defineProps<{ targets: readonly TagTarget[] }>();
 const emit = defineEmits<{ close: [] }>();
@@ -66,7 +68,7 @@ async function confirm(): Promise<void> {
       </ul>
 
       <label class="flex items-start gap-2 text-xs text-muted">
-        <input v-model="detach" type="checkbox" class="mt-0.5 accent-[var(--color-accent)]" />
+        <BaseCheckbox v-model="detach" class="mt-0.5" />
         <span>
           Remove the tag from media first (one extra editor call per instance).
           <span class="block text-[11px] text-faint">
@@ -80,7 +82,7 @@ async function confirm(): Promise<void> {
         v-if="totalAttached > 0"
         class="rounded-md border border-danger/40 bg-danger/5 px-3 py-2 text-[11px] leading-relaxed text-danger"
       >
-        ⚠ These tags are attached to {{ totalAttached }} media item(s) across the fleet. Deleting
+        <IconWarning /> These tags are attached to {{ totalAttached }} media item(s) across the fleet. Deleting
         them removes the tag from those items - any filter, quality profile or list rule that keys
         on the tag stops matching.
       </p>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useUiStore } from '@/stores/ui';
+import IconClose from '@/components/base/icons/IconClose.vue';
 
 const ui = useUiStore();
 
@@ -26,7 +27,7 @@ const STYLES = {
         aria-label="Dismiss"
         @click="ui.dismiss(toast.id)"
       >
-        ✕
+        <IconClose size="sm" />
       </button>
     </div>
   </div>

@@ -4,6 +4,7 @@ import BaseButton from '@/components/base/BaseButton.vue';
 import BaseModal from '@/components/base/BaseModal.vue';
 import { useMatrixStore } from '@/stores/matrix';
 import { useQueueStore } from '@/stores/queue';
+import BaseCheckbox from '@/components/base/BaseCheckbox.vue';
 
 const emit = defineEmits<{ close: [] }>();
 
@@ -74,11 +75,9 @@ async function confirm(): Promise<void> {
               "
             >
               <span class="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  :checked="selected.includes(candidate.instanceId)"
+                <BaseCheckbox
+                  :model-value="selected.includes(candidate.instanceId)"
                   :disabled="candidate.alreadyHas"
-                  class="accent-[var(--color-accent)]"
                   @change="toggle(candidate.instanceId)"
                 />
                 {{ candidate.name }}

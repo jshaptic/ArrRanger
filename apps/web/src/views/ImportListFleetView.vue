@@ -9,6 +9,9 @@ import AlignRootFolderDialog from '@/components/imports/AlignRootFolderDialog.vu
 import { stagedIntent, TONE_CLASSES } from '@/lib/staging';
 import { useMatrixStore } from '@/stores/matrix';
 import { useQueueStore, type ImportListTarget } from '@/stores/queue';
+import IconImportList from '@/components/base/icons/IconImportList.vue';
+import IconAbsent from '@/components/base/icons/IconAbsent.vue';
+import BaseCheckbox from '@/components/base/BaseCheckbox.vue';
 
 const matrix = useMatrixStore();
 const queue = useQueueStore();
@@ -101,7 +104,7 @@ onMounted(() => {
       v-if="matrix.importListRows.length === 0"
       :title="matrix.loading ? 'Loading the fleet…' : 'No import lists found'"
       description="Import lists are compared by name across instances. Creating a new list still happens in Radarr/Sonarr - ArrRanger keeps the ones you have consistent."
-      icon="📥"
+      :icon="IconImportList"
     />
 
     <div v-else class="overflow-x-auto rounded-lg border border-line">
@@ -134,10 +137,8 @@ onMounted(() => {
               :class="selectedKeys.includes(row.key) ? 'bg-[#16202b]' : 'bg-surface'"
             >
               <label class="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  :checked="selectedKeys.includes(row.key)"
-                  class="accent-[var(--color-accent)]"
+                <BaseCheckbox
+                  :model-value="selectedKeys.includes(row.key)"
                   @change="toggleRow(row.key)"
                 />
                 <span class="min-w-0 flex-1">
@@ -219,7 +220,7 @@ onMounted(() => {
                 class="flex h-11 items-center justify-center rounded border border-dashed border-line-strong text-xs text-faint"
                 :title="`${instanceName(cell.instanceId)}: this list does not exist here`"
               >
-                —
+                <IconAbsent size="sm" />
               </div>
             </td>
           </tr>

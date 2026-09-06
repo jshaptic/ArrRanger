@@ -443,7 +443,7 @@ describe('PathMatrixView', () => {
   it('flags a root folder an instance cannot reach', async () => {
     const wrapper = await mountView();
     // Radarr-HD reports /data/media/tv as inaccessible.
-    expect(rowFor(wrapper, 'tv')?.text()).toContain('⚠');
+    expect(rowFor(wrapper, 'tv')?.find('[data-icon="warning"]').exists()).toBe(true);
   });
 
   it('never renders a mount badge - the leading slash already says it', async () => {
@@ -477,17 +477,16 @@ describe('PathMatrixView', () => {
   it('does not offer to expand a root folder', async () => {
     const wrapper = await mountView();
     const row = rowAt(wrapper, '/data/media/movies');
-    const twisty = row.findAll('button').find((button) => /[▾▸]/.test(button.text()));
 
-    expect(twisty).toBeUndefined();
+    expect(row.find('[data-testid="path-twisty"]').exists()).toBe(false);
   });
 
   it('drops the twisty and the focus icon in the flat list - there is no tree to walk', async () => {
     const wrapper = await mountView();
 
     const treeRow = rowAt(wrapper, '/data');
-    expect(treeRow.findAll('button').some((button) => /[▾▸]/.test(button.text()))).toBe(true);
-    expect(treeRow.findAll('button').some((button) => button.text() === '⌖')).toBe(true);
+    expect(treeRow.find('[data-testid="path-twisty"]').exists()).toBe(true);
+    expect(treeRow.find('[data-testid="path-focus"]').exists()).toBe(true);
 
     const toggle = wrapper.findAll('button').find((button) => button.text() === 'Flat list');
     await toggle?.trigger('click');
@@ -496,9 +495,8 @@ describe('PathMatrixView', () => {
     const rows = wrapper.findAll('tbody tr');
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {
-      const buttons = row.findAll('button');
-      expect(buttons.some((button) => /[▾▸]/.test(button.text()))).toBe(false);
-      expect(buttons.some((button) => button.text() === '⌖')).toBe(false);
+      expect(row.find('[data-testid="path-twisty"]').exists()).toBe(false);
+      expect(row.find('[data-testid="path-focus"]').exists()).toBe(false);
     }
   });
 
@@ -666,8 +664,10 @@ describe('PathMatrixView', () => {
     const wrapper = await mountView();
 
     expect(rowAt(wrapper, '/data/media/old-movies').find('[data-severity="own"]').exists()).toBe(true);
-    expect(rowAt(wrapper, '/elsewhere/movies').find('[data-severity="own"]').text()).toBe('✕');
-    // A healthy root folder gets no glyph - one on every row would be noise.
+    expect(
+      rowAt(wrapper, '/elsewhere/movies').find('[data-severity="own"] [data-icon="error"]').exists(),
+    ).toBe(true);
+    // A healthy root folder gets no icon - one on every row would be noise.
     expect(rowAt(wrapper, '/data/media/movies').find('[data-severity="own"]').exists()).toBe(false);
   });
 
@@ -721,15 +721,15 @@ describe('PathMatrixView', () => {
     expect(notice.text()).toContain('deliberately not "nobody"');
 
     // An ownerless row carries the same caveat, so it cannot read as a gap...
-    expect(rowAt(wrapper, '/data/media/spare').text()).toContain('?');
+    expect(rowAt(wrapper, '/data/media/spare').find('[data-icon="unknown"]').exists()).toBe(true);
     // ...but a row that already has an owner does not repeat it.
-    expect(rowAt(wrapper, '/data/media/movies').text()).not.toContain('?');
+    expect(rowAt(wrapper, '/data/media/movies').find('[data-icon="unknown"]').exists()).toBe(false);
   });
 
   it('says nothing about unknowns when the whole fleet answered', async () => {
     const wrapper = await mountView();
     expect(wrapper.find('[data-testid="unknown-instances"]').exists()).toBe(false);
-    expect(rowAt(wrapper, '/data/media/spare').text()).not.toContain('?');
+    expect(rowAt(wrapper, '/data/media/spare').find('[data-icon="unknown"]').exists()).toBe(false);
   });
 
   // ------------------------------------------------------- the folder filter

@@ -6,6 +6,8 @@ import { findCollisions } from '@/lib/matrix';
 import { useInstancesStore } from '@/stores/instances';
 import { useMatrixStore } from '@/stores/matrix';
 import { useQueueStore, type TagTarget } from '@/stores/queue';
+import IconRenameArrow from '@/components/base/icons/IconRenameArrow.vue';
+import IconWarning from '@/components/base/icons/IconWarning.vue';
 
 const props = defineProps<{ label: string; targets: readonly TagTarget[] }>();
 const emit = defineEmits<{ close: [] }>();
@@ -67,7 +69,7 @@ async function confirm(): Promise<void> {
             <span class="text-ink">{{ nameOf(target.instanceId) }}</span>
             <span class="font-mono text-[11px] text-muted">
               <span class="line-through opacity-60">{{ target.label }}</span>
-              <span class="mx-1 text-accent">→</span>
+              <IconRenameArrow size="xs" class="mx-1 text-accent" />
               <span class="text-ink">{{ nextLabel || '…' }}</span>
             </span>
           </li>
@@ -78,7 +80,7 @@ async function confirm(): Promise<void> {
         v-if="collisions.size > 0"
         class="rounded-md border border-drift/40 bg-drift/5 px-3 py-2 text-[11px] leading-relaxed text-drift"
       >
-        ⚠ {{ collisions.size }} instance(s) already have a tag called "{{ nextLabel }}". A rename
+        <IconWarning /> {{ collisions.size }} instance(s) already have a tag called "{{ nextLabel }}". A rename
         there would be rejected by *Arr - use Find &amp; Replace instead, which merges into the
         existing tag rather than colliding with it.
       </p>

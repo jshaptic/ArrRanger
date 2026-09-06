@@ -3,6 +3,8 @@ import { computed } from 'vue';
 import type { QueueItem } from '@arrranger/shared';
 import type { TagCell } from '@/lib/matrix';
 import { stagedIntent, TONE_CLASSES } from '@/lib/staging';
+import IconAbsent from '@/components/base/icons/IconAbsent.vue';
+import IconUnknown from '@/components/base/icons/IconUnknown.vue';
 
 const props = defineProps<{
   cell: TagCell;
@@ -43,14 +45,15 @@ const title = computed(() => {
       :class="cellClasses"
       :disabled="!cell.known"
       :title="title"
+      :aria-label="title"
       @click="cell.present ? emit('remove') : emit('create')"
     >
       <template v-if="!cell.known">
-        <span class="font-mono text-xs">?</span>
+        <IconUnknown size="sm" />
       </template>
       <template v-else-if="cell.present">
         <span class="flex items-center gap-1">
-          <span v-if="intent" class="text-[10px]">{{ intent.icon }}</span>
+          <component :is="intent.icon" v-if="intent" size="xs" />
           <span class="font-mono" :class="intent?.tone === 'destroy' ? 'line-through opacity-70' : ''">
             {{ cell.mediaCount }}
           </span>
@@ -60,8 +63,10 @@ const title = computed(() => {
         </span>
       </template>
       <template v-else>
-        <span v-if="intent" class="text-[11px]">{{ intent.icon }} new</span>
-        <span v-else class="text-xs opacity-50">—</span>
+        <span v-if="intent" class="flex items-center gap-0.5 text-[11px]">
+          <component :is="intent.icon" size="xs" /> new
+        </span>
+        <IconAbsent v-else size="sm" class="opacity-50" />
       </template>
     </button>
   </td>

@@ -8,6 +8,10 @@ import { basename, joinPath, parentOf } from '@/lib/fs-tree';
 import { formatBytes } from '@/lib/format';
 import { usePathsStore } from '@/stores/paths';
 import { useQueueStore } from '@/stores/queue';
+import IconCheck from '@/components/base/icons/IconCheck.vue';
+import IconError from '@/components/base/icons/IconError.vue';
+import IconWarning from '@/components/base/icons/IconWarning.vue';
+import BaseCheckbox from '@/components/base/BaseCheckbox.vue';
 
 /**
  * What this dialog still does to a folder that exists.
@@ -334,14 +338,14 @@ watch([name, destination, recursive, force], () => void check());
           bin - once the queue applies this step, the only way back is your backups.
         </p>
         <label class="flex items-start gap-2 text-xs text-muted">
-          <input v-model="recursive" type="checkbox" class="mt-0.5 accent-[var(--color-danger)]" />
+          <BaseCheckbox v-model="recursive" tone="danger" class="mt-0.5" />
           <span>
             <span class="font-medium text-ink">Delete contents too</span>
             <span class="block text-[11px]">Required for a folder that is not empty.</span>
           </span>
         </label>
         <label class="flex items-start gap-2 text-xs text-muted">
-          <input v-model="force" type="checkbox" class="mt-0.5 accent-[var(--color-danger)]" />
+          <BaseCheckbox v-model="force" tone="danger" class="mt-0.5" />
           <span>
             <span class="font-medium text-ink">Delete even though an instance still tracks it</span>
             <span class="block text-[11px]">
@@ -369,10 +373,8 @@ watch([name, destination, recursive, force], () => void check());
           <li v-for="entry in props.alignTargets" :key="entry.instanceId">
             <label class="flex items-center justify-between gap-3 rounded border border-line bg-raised/60 px-2.5 py-1.5 text-xs">
               <span class="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  :checked="selectedInstances.includes(entry.instanceId)"
-                  class="accent-[var(--color-accent)]"
+                <BaseCheckbox
+                  :model-value="selectedInstances.includes(entry.instanceId)"
                   @change="toggleInstance(entry.instanceId)"
                 />
                 {{ entry.name }}
@@ -391,7 +393,7 @@ watch([name, destination, recursive, force], () => void check());
 
         <div class="space-y-2 rounded-md border border-line bg-raised/40 px-3 py-2.5 text-xs">
           <label class="flex items-start gap-2">
-            <input v-model="refreshAfter" type="checkbox" class="mt-0.5 accent-[var(--color-accent)]" />
+            <BaseCheckbox v-model="refreshAfter" class="mt-0.5" />
             <span>
               <span class="font-medium text-ink">Rescan afterwards</span>
               <span class="block text-[11px] text-muted">
@@ -400,7 +402,7 @@ watch([name, destination, recursive, force], () => void check());
             </span>
           </label>
           <label class="flex items-start gap-2">
-            <input v-model="removeOld" type="checkbox" class="mt-0.5 accent-[var(--color-accent)]" />
+            <BaseCheckbox v-model="removeOld" class="mt-0.5" />
             <span>
               <span class="font-medium text-ink">Remove the old root folder</span>
               <span class="block text-[11px] text-muted">
@@ -448,15 +450,15 @@ watch([name, destination, recursive, force], () => void check());
 
         <ul v-if="preflight" class="space-y-1 text-[11px]">
           <li v-for="check in blockers" :key="check.id" class="flex gap-2 text-danger">
-            <span>✕</span>
+            <IconError class="mt-0.5" />
             <span>{{ check.message }}</span>
           </li>
           <li v-for="check in warnings" :key="check.id" class="flex gap-2 text-drift">
-            <span>⚠</span>
+            <IconWarning class="mt-0.5" />
             <span>{{ check.message }}</span>
           </li>
           <li v-for="check in passed" :key="check.id" class="flex gap-2 text-muted">
-            <span class="text-sync">✓</span>
+            <IconCheck size="xs" class="mt-0.5 text-sync" />
             <span>{{ check.message }}</span>
           </li>
         </ul>

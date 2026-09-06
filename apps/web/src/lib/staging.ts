@@ -1,32 +1,41 @@
+import type { Component } from 'vue';
 import type { QueueItem, QueueItemStatus, QueueOp } from '@arrranger/shared';
+import IconCreate from '@/components/base/icons/IconCreate.vue';
+import IconDelete from '@/components/base/icons/IconDelete.vue';
+import IconEdit from '@/components/base/icons/IconEdit.vue';
+import IconMerge from '@/components/base/icons/IconMerge.vue';
+import IconMove from '@/components/base/icons/IconMove.vue';
+import IconRefresh from '@/components/base/icons/IconRefresh.vue';
+import IconRemove from '@/components/base/icons/IconRemove.vue';
+import IconToggle from '@/components/base/icons/IconToggle.vue';
 
 export type OpTone = 'create' | 'update' | 'move' | 'destroy';
 
 export interface OpPresentation {
-  readonly icon: string;
+  readonly icon: Component;
   readonly label: string;
   readonly tone: OpTone;
 }
 
-/** One place for the glyph + wording of every operation, shared by cells and the drawer. */
+/** One place for the icon + wording of every operation, shared by cells and the drawer. */
 const PRESENTATION: Record<QueueOp, OpPresentation> = {
-  'tag.create': { icon: '＋', label: 'Create tag', tone: 'create' },
-  'tag.rename': { icon: '✎', label: 'Rename tag', tone: 'update' },
-  'tag.delete': { icon: '✕', label: 'Delete tag', tone: 'destroy' },
-  'tag.merge': { icon: '⤵', label: 'Merge tags', tone: 'destroy' },
-  'mediaTags.add': { icon: '＋', label: 'Add tags to media', tone: 'update' },
-  'mediaTags.remove': { icon: '−', label: 'Remove tags from media', tone: 'update' },
-  'rootFolder.create': { icon: '＋', label: 'Add root folder', tone: 'create' },
-  'rootFolder.delete': { icon: '✕', label: 'Remove root folder', tone: 'destroy' },
-  'media.moveRootFolder': { icon: '➜', label: 'Move to root folder', tone: 'move' },
-  'importList.update': { icon: '✎', label: 'Update import list', tone: 'update' },
-  'importList.delete': { icon: '✕', label: 'Delete import list', tone: 'destroy' },
-  'importList.setEnabled': { icon: '⏻', label: 'Toggle import list', tone: 'update' },
-  'media.refresh': { icon: '⟳', label: 'Rescan library', tone: 'update' },
-  'fs.mkdir': { icon: '＋', label: 'Create directory', tone: 'create' },
-  'fs.rename': { icon: '✎', label: 'Rename on disk', tone: 'move' },
-  'fs.move': { icon: '➜', label: 'Move on disk', tone: 'move' },
-  'fs.delete': { icon: '✕', label: 'Delete from disk', tone: 'destroy' },
+  'tag.create': { icon: IconCreate, label: 'Create tag', tone: 'create' },
+  'tag.rename': { icon: IconEdit, label: 'Rename tag', tone: 'update' },
+  'tag.delete': { icon: IconDelete, label: 'Delete tag', tone: 'destroy' },
+  'tag.merge': { icon: IconMerge, label: 'Merge tags', tone: 'destroy' },
+  'mediaTags.add': { icon: IconCreate, label: 'Add tags to media', tone: 'update' },
+  'mediaTags.remove': { icon: IconRemove, label: 'Remove tags from media', tone: 'update' },
+  'rootFolder.create': { icon: IconCreate, label: 'Add root folder', tone: 'create' },
+  'rootFolder.delete': { icon: IconDelete, label: 'Remove root folder', tone: 'destroy' },
+  'media.moveRootFolder': { icon: IconMove, label: 'Move to root folder', tone: 'move' },
+  'importList.update': { icon: IconEdit, label: 'Update import list', tone: 'update' },
+  'importList.delete': { icon: IconDelete, label: 'Delete import list', tone: 'destroy' },
+  'importList.setEnabled': { icon: IconToggle, label: 'Toggle import list', tone: 'update' },
+  'media.refresh': { icon: IconRefresh, label: 'Rescan library', tone: 'update' },
+  'fs.mkdir': { icon: IconCreate, label: 'Create directory', tone: 'create' },
+  'fs.rename': { icon: IconEdit, label: 'Rename on disk', tone: 'move' },
+  'fs.move': { icon: IconMove, label: 'Move on disk', tone: 'move' },
+  'fs.delete': { icon: IconDelete, label: 'Delete from disk', tone: 'destroy' },
 };
 
 export function presentOp(op: QueueOp): OpPresentation {

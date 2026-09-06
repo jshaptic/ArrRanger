@@ -7,6 +7,8 @@ import StagedOperationRow from '@/components/staging/StagedOperationRow.vue';
 import { initialsOf } from '@/lib/format';
 import { useQueueStore } from '@/stores/queue';
 import { useUiStore } from '@/stores/ui';
+import IconCaretDown from '@/components/base/icons/IconCaretDown.vue';
+import IconCaretUp from '@/components/base/icons/IconCaretUp.vue';
 
 type Grouping = 'instance' | 'sequence';
 type OnError = 'pause' | 'continue' | 'abort';
@@ -46,7 +48,10 @@ function applyAll(): void {
         :aria-expanded="ui.drawerOpen"
         @click="ui.toggleDrawer()"
       >
-        <span class="text-xs">{{ ui.drawerOpen ? '▼' : '▲' }}</span>
+        <!-- Solid: the `▼`/`▲` these replaced are solid, and a hairline chevron
+             disappears against the drawer chrome at this size. -->
+        <IconCaretDown v-if="ui.drawerOpen" size="sm" variant="solid" />
+        <IconCaretUp v-else size="sm" variant="solid" />
         <span class="text-xs font-semibold tracking-wide uppercase">Pending fleet changes</span>
         <span
           class="rounded-full border px-2 py-0.5 font-mono text-[11px]"

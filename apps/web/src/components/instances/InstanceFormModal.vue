@@ -8,6 +8,9 @@ import { ApiRequestError } from '@/api/client';
 import { useInstancesStore } from '@/stores/instances';
 import { useMatrixStore } from '@/stores/matrix';
 import { useUiStore } from '@/stores/ui';
+import IconCheck from '@/components/base/icons/IconCheck.vue';
+import IconError from '@/components/base/icons/IconError.vue';
+import BaseCheckbox from '@/components/base/BaseCheckbox.vue';
 
 const KIND_OPTIONS: readonly SelectOption<InstanceKind>[] = [
   { value: 'radarr', label: 'Radarr (movies)' },
@@ -150,7 +153,7 @@ async function save(): Promise<void> {
 
       <div class="grid gap-3 sm:grid-cols-2">
         <label class="flex items-center gap-2 text-xs text-muted">
-          <input v-model="verifySsl" type="checkbox" class="accent-[var(--color-accent)]" />
+          <BaseCheckbox v-model="verifySsl" />
           Verify SSL certificate
         </label>
         <label class="flex items-center gap-2 text-xs text-muted">
@@ -177,11 +180,11 @@ async function save(): Promise<void> {
         "
       >
         <template v-if="testResult.ok">
-          ✓ Connected to {{ testResult.instanceName ?? 'the instance' }} · version
+          <IconCheck size="xs" /> Connected to {{ testResult.instanceName ?? 'the instance' }} · version
           {{ testResult.appVersion }}
         </template>
         <template v-else>
-          ✕ {{ testResult.error?.code }}: {{ testResult.error?.message }}
+          <IconError /> {{ testResult.error?.code }}: {{ testResult.error?.message }}
         </template>
       </div>
     </div>

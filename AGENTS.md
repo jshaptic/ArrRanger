@@ -11,6 +11,19 @@
   paths; comparison is literal. A mismatch is reported, never bridged.
 - **ALWAYS `PUT` a merged resource** - fetch raw, merge changed keys, PUT (`mergeForPut`).
   A partial body silently wipes omitted fields.
+- **NEVER import an icon library outside `components/base/icons/glyphs.ts`.** That module
+  is the app's only contact with `@remixicon/vue`; every other file asks for a meaning
+  (`IconWarning`) and optionally a weight (`variant="solid"`), never a drawing.
+  `icons.test.ts` fails the build if anything else names it.
+- **NEVER size an icon with a class.** Sizing is the `size` prop - `xs`/`sm`/`md`/`lg`/
+  `xl`/`2xl`, fixed rem, tabled in `BaseIcon.vue`. A caller's `class="h-3 w-3"` does not
+  error: it loses to `BaseIcon`'s own class by Tailwind's emit order and is silently
+  dropped. The suite fails the build on any `h-*`/`w-*` passed to an icon.
+- **NEVER add a `<style>` block.** Every one of the 28 components is utility-classes-only,
+  and `icons.test.ts` pins that at zero.
+- **NEVER hand-roll a checkbox.** `BaseCheckbox` is the only one, and it keeps a real
+  `<input type="checkbox">` under a drawn box - the platform's keyboard handling, label
+  association and `:indeterminate` are not worth re-implementing.
 - **ALWAYS run `npm run typecheck` and `npm test`** before calling work done.
 
 ## Project context
@@ -44,7 +57,7 @@ carry meaning. Do not invent a sixth.
 | dashed empty cell | missing on that instance (click to stage it there) |
 | amber | drift: partial parity, an inaccessible mount, or a setting that disagrees |
 | violet ring + glyph | a staged operation is pending for this cell |
-| red `?` | that instance did not answer - unknown, deliberately *not* "missing" |
+| red unknown icon | that instance did not answer - unknown, deliberately *not* "missing" |
 
 The last is enforced in `buildTagRows` / `buildRootFolderRows` (`cell.known`) and covered
 by tests. The folder view has no cells to colour, so an instance that did not answer is
@@ -93,16 +106,16 @@ then anything staged, then the glyph. There is no State column.
 
 | Severity | Source | Rendered |
 |---|---|---|
-| `error` | `not mounted here`, `missing`, `no access` | red `✕` |
-| `warn` | `not a root folder`, `unmanaged`, `read-only`, low free space, a root folder its own instance calls inaccessible | amber `⚠` |
+| `error` | `not mounted here`, `missing`, `no access` | red error icon |
+| `warn` | `not a root folder`, `unmanaged`, `read-only`, low free space, a root folder its own instance calls inaccessible | amber warning icon |
 | `info` | `untracked`, `empty`, `symlink` | nothing |
 | `ok` | none of the above | nothing |
 
 `untracked` stays `info` on purpose - it fires on every non-media folder, so promoting it
-would paint a healthy library amber. A collapsed row shows a dimmed `⚠` for worse below.
+would paint a healthy library amber. A collapsed row shows a dimmed warning for worse below.
 
 Free space is per filesystem, never per instance: resolved by device id, one `statfs` per
-distinct filesystem per request, seeded from `FS_ROOTS`. `⚠ low` only ever lands on a
+distinct filesystem per request, seeded from `FS_ROOTS`. A low-space warning only ever lands on a
 **mount or a root folder**. Never restore a per-instance total - it double-counts a disk.
 
 ### Filters

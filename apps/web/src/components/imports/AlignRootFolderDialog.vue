@@ -5,6 +5,7 @@ import BaseModal from '@/components/base/BaseModal.vue';
 import { useInstancesStore } from '@/stores/instances';
 import { useMatrixStore } from '@/stores/matrix';
 import { useQueueStore, type ImportListTarget } from '@/stores/queue';
+import IconWarning from '@/components/base/icons/IconWarning.vue';
 
 const props = defineProps<{ targets: readonly ImportListTarget[]; names: readonly string[] }>();
 const emit = defineEmits<{ close: [] }>();
@@ -64,7 +65,7 @@ async function confirm(): Promise<void> {
         v-if="valid && missingOn.length > 0"
         class="rounded-md border border-drift/40 bg-drift/5 px-3 py-2 text-[11px] leading-relaxed text-drift"
       >
-        ⚠ {{ rootFolderPath }} is not a root folder on
+        <IconWarning /> {{ rootFolderPath }} is not a root folder on
         {{ missingOn.map((target) => nameOf(target.instanceId)).join(', ') }}. *Arr will reject the
         update there - stage the root folder in the Topology view first, or drop those instances
         from the selection.

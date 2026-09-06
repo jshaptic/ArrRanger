@@ -5,6 +5,10 @@ import BaseButton from '@/components/base/BaseButton.vue';
 import { initialsOf } from '@/lib/format';
 import { isDestructive, presentOp, STATUS_CLASSES, STATUS_LABELS, TONE_CLASSES } from '@/lib/staging';
 import { useInstancesStore } from '@/stores/instances';
+import IconClose from '@/components/base/icons/IconClose.vue';
+import IconMoveDown from '@/components/base/icons/IconMoveDown.vue';
+import IconMoveUp from '@/components/base/icons/IconMoveUp.vue';
+import IconWarning from '@/components/base/icons/IconWarning.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -50,7 +54,7 @@ const destructive = computed(() => isDestructive(props.item));
       :class="TONE_CLASSES[op.tone]"
       :title="op.label"
     >
-      {{ op.icon }}
+      <component :is="op.icon" size="sm" />
     </span>
 
     <div class="min-w-0 flex-1">
@@ -80,8 +84,13 @@ const destructive = computed(() => isDestructive(props.item));
         >
           {{ STATUS_LABELS[item.status] }}
         </span>
-        <span v-if="destructive" class="text-[10px] text-danger" title="This operation removes or moves data">
-          ⚠ destructive
+        <span
+          v-if="destructive"
+          class="flex items-center gap-0.5 text-[10px] text-danger"
+          title="This operation removes or moves data"
+          data-testid="destructive"
+        >
+          <IconWarning size="md" /> destructive
         </span>
         <span v-if="item.affectedCount > 1" class="text-[10px] text-faint">
           {{ item.affectedCount }} items
@@ -108,17 +117,22 @@ const destructive = computed(() => isDestructive(props.item));
         retry
       </BaseButton>
       <template v-if="reorderable && item.status === 'pending'">
-        <BaseButton size="sm" variant="ghost" title="Run earlier" @click="emit('up')">↑</BaseButton>
-        <BaseButton size="sm" variant="ghost" title="Run later" @click="emit('down')">↓</BaseButton>
+        <BaseButton size="sm" variant="ghost" title="Run earlier" aria-label="Run earlier" @click="emit('up')">
+          <IconMoveUp size="sm" />
+        </BaseButton>
+        <BaseButton size="sm" variant="ghost" title="Run later" aria-label="Run later" @click="emit('down')">
+          <IconMoveDown size="sm" />
+        </BaseButton>
       </template>
       <BaseButton
         v-if="removable && item.status !== 'running'"
         size="sm"
         variant="ghost"
         title="Discard this operation"
+        aria-label="Discard this operation"
         @click="emit('remove')"
       >
-        ✕
+        <IconClose size="sm" />
       </BaseButton>
     </div>
   </li>

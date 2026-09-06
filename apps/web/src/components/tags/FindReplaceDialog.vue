@@ -6,6 +6,8 @@ import { findCollisions } from '@/lib/matrix';
 import { useInstancesStore } from '@/stores/instances';
 import { useMatrixStore } from '@/stores/matrix';
 import { useQueueStore } from '@/stores/queue';
+import IconRenameArrow from '@/components/base/icons/IconRenameArrow.vue';
+import BaseCheckbox from '@/components/base/BaseCheckbox.vue';
 
 const emit = defineEmits<{ close: [] }>();
 
@@ -84,11 +86,11 @@ async function confirm(): Promise<void> {
 
       <div class="flex flex-wrap gap-4 text-xs text-muted">
         <label class="flex items-center gap-2">
-          <input v-model="caseSensitive" type="checkbox" class="accent-[var(--color-accent)]" />
+          <BaseCheckbox v-model="caseSensitive" />
           case sensitive
         </label>
         <label class="flex items-center gap-2">
-          <input v-model="onlyTargets" type="checkbox" class="accent-[var(--color-accent)]" />
+          <BaseCheckbox v-model="onlyTargets" />
           only the {{ matrix.targetInstanceIds.length }} targeted instance(s)
         </label>
       </div>
@@ -109,7 +111,7 @@ async function confirm(): Promise<void> {
           >
             <span class="font-mono">
               <span class="text-muted line-through opacity-70">{{ preview.from }}</span>
-              <span class="mx-1.5 text-accent">→</span>
+              <IconRenameArrow class="mx-1.5 text-accent" />
               <span class="text-ink">{{ preview.to }}</span>
             </span>
             <span class="flex items-center gap-2 text-[11px] whitespace-nowrap">

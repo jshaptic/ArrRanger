@@ -1,3 +1,6 @@
+import type { Component } from 'vue';
+import IconError from '@/components/base/icons/IconError.vue';
+import IconWarning from '@/components/base/icons/IconWarning.vue';
 import {
   matchPathFilter,
   PATH_SEVERITIES,
@@ -201,12 +204,12 @@ function keepsLeaf(filter: PathFilter | null, target: string): boolean {
   return matchPathFilter(filter, target) === 'full';
 }
 
-/** How a severity is rendered. `ok` and `info` are silent - a glyph on every row is noise. */
-export const SEVERITY_STYLES: Record<PathSeverity, { glyph: string; classes: string } | null> = {
+/** How a severity is rendered. `ok` and `info` are silent - an icon on every row is noise. */
+export const SEVERITY_STYLES: Record<PathSeverity, { icon: Component; classes: string } | null> = {
   ok: null,
   info: null,
-  warn: { glyph: '\u26a0', classes: 'text-drift' },
-  error: { glyph: '\u2715', classes: 'text-danger' },
+  warn: { icon: IconWarning, classes: 'text-drift' },
+  error: { icon: IconError, classes: 'text-danger' },
 };
 
 /** The worst of a set - `PATH_SEVERITIES` is ordered, so this is a max. */

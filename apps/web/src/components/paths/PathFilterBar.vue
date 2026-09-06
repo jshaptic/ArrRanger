@@ -2,6 +2,9 @@
 import { computed, ref, watch } from 'vue';
 import { parsePathFilter, type PathFilterMode } from '@arrranger/shared';
 import { usePathsStore } from '@/stores/paths';
+import IconClose from '@/components/base/icons/IconClose.vue';
+import IconHelp from '@/components/base/icons/IconHelp.vue';
+import IconWarning from '@/components/base/icons/IconWarning.vue';
 
 /**
  * The folder filter.
@@ -108,9 +111,10 @@ function setMode(mode: PathFilterMode): void {
             class="px-1 text-xs text-faint transition-colors hover:text-ink"
             title="Clear the filter (Esc)"
             data-testid="path-filter-clear"
+            aria-label="Clear the filter"
             @click="clear"
           >
-            ✕
+            <IconClose size="sm" />
           </button>
           <button
             type="button"
@@ -118,9 +122,10 @@ function setMode(mode: PathFilterMode): void {
             :class="showHelp ? 'text-accent' : 'text-faint hover:text-ink'"
             title="Filter syntax"
             :aria-expanded="showHelp"
+            aria-label="Filter syntax help"
             @click="showHelp = !showHelp"
           >
-            ?
+            <IconHelp size="sm" />
           </button>
         </div>
       </div>
@@ -134,7 +139,7 @@ function setMode(mode: PathFilterMode): void {
       class="text-[11px] text-danger"
       data-testid="path-filter-error"
     >
-      ⚠ {{ parsed.error }} - the filter is not applied
+      <IconWarning /> {{ parsed.error }} - the filter is not applied
     </p>
 
     <div

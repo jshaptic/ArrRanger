@@ -162,7 +162,7 @@ describe('StagingDrawer', () => {
     ui.openDrawer();
     await flushPromises();
 
-    expect(wrapper.text()).toContain('⚠ destructive');
+    expect(wrapper.find('[data-testid="destructive"]').text()).toBe('destructive');
 
     const byInstance = wrapper.findAll('button').find((b) => b.text() === 'By instance');
     await byInstance?.trigger('click');

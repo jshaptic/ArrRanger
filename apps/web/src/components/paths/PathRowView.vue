@@ -1,7 +1,15 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, type Component } from 'vue';
 import type { PathNode, PathSeverity, QueueItem } from '@arrranger/shared';
 import BaseButton from '@/components/base/BaseButton.vue';
+import IconCollapsed from '@/components/base/icons/IconCollapsed.vue';
+import IconError from '@/components/base/icons/IconError.vue';
+import IconExpanded from '@/components/base/icons/IconExpanded.vue';
+import IconFile from '@/components/base/icons/IconFile.vue';
+import IconFocus from '@/components/base/icons/IconFocus.vue';
+import IconLoading from '@/components/base/icons/IconLoading.vue';
+import IconSymlink from '@/components/base/icons/IconSymlink.vue';
+import IconWarning from '@/components/base/icons/IconWarning.vue';
 import PathFlagBadge from './PathFlagBadge.vue';
 import PathOwnerChips from './PathOwnerChips.vue';
 import { formatBytes, formatRelativeTime } from '@/lib/format';
@@ -14,6 +22,7 @@ import {
   type PathAction,
 } from '@/lib/path-matrix';
 import { stagedIntent, TONE_CLASSES } from '@/lib/staging';
+import BaseCheckbox from '@/components/base/BaseCheckbox.vue';
 
 const props = defineProps<{
   node: PathNode;
@@ -128,12 +137,23 @@ const inheritedSeverity = computed(() => {
   return SEVERITY_STYLES[props.childSeverity];
 });
 
-const glyph = computed(() => {
-  if (props.loading) return '⋯';
-  if (props.node.kind === 'symlink') return '⇢';
-  if (!props.node.exists) return '✕';
-  if (props.node.kind !== 'directory') return '·';
-  return props.expanded ? '▾' : '▸';
+const twistyIcon = computed<Component>(() => {
+  if (props.loading) return IconLoading;
+  if (props.node.kind === 'symlink') return IconSymlink;
+  if (!props.node.exists) return IconError;
+  if (props.node.kind !== 'directory') return IconFile;
+  return props.expanded ? IconExpanded : IconCollapsed;
+});
+
+/**
+ * Hoisted out of the template so the button can say the same thing twice - as a tooltip
+ * for a mouse and as an accessible name for everyone else. Its only content is an icon,
+ * so without the second the control has no name at all.
+ */
+const twistyTitle = computed(() => {
+  if (props.loading) return 'Reading…';
+  if (!props.node.expandable) return 'Nothing to expand here';
+  return props.expanded ? 'Collapse' : 'Expand';
 });
 
 /**
@@ -193,11 +213,9 @@ const spaceTitle = computed(() => {
       :class="selected ? 'bg-[#16202b]' : 'bg-surface'"
     >
       <div class="flex items-center gap-1.5" :style="{ paddingLeft: `${String(depth * 0.9)}rem` }">
-        <input
+        <BaseCheckbox
           v-if="selectable"
-          type="checkbox"
-          class="accent-[var(--color-accent)]"
-          :checked="selected"
+          :model-value="selected"
           :title="`Select ${node.path}`"
           @change="emit('select')"
         />
@@ -205,7 +223,7 @@ const spaceTitle = computed(() => {
              with its children's. -->
         <span
           v-else
-          class="w-3 shrink-0"
+          class="w-3.5 shrink-0"
           title="This folder holds subfolders - select those instead"
           data-testid="no-checkbox"
         ></span>
@@ -214,21 +232,15 @@ const spaceTitle = computed(() => {
           <button
             v-if="!node.flags.includes('rootFolder')"
             type="button"
+            data-testid="path-twisty"
             class="w-4 shrink-0 text-left transition-colors hover:text-ink disabled:opacity-30"
-            :class="loading ? 'animate-pulse text-accent' : 'text-faint'"
+            :class="loading ? 'animate-spin text-accent' : 'text-faint'"
             :disabled="!node.expandable || loading"
-            :title="
-              loading
-                ? 'Reading…'
-                : node.expandable
-                  ? expanded
-                    ? 'Collapse'
-                    : 'Expand'
-                  : 'Nothing to expand here'
-            "
+            :title="twistyTitle"
+            :aria-label="twistyTitle"
             @click="emit('toggle')"
           >
-            {{ glyph }}
+            <component :is="twistyIcon" size="sm" />
           </button>
           <span v-else class="w-4 shrink-0"></span>
         </template>
@@ -245,12 +257,14 @@ const spaceTitle = computed(() => {
         <button
           v-if="canFocus"
           type="button"
+          data-testid="path-focus"
           class="shrink-0 text-[11px] text-faint transition-colors hover:text-accent"
           title="Focus: re-root this view at this folder"
+          aria-label="Focus this folder"
           :disabled="busy"
           @click="emit('action', 'focus')"
         >
-          ⌖
+          <IconFocus />
         </button>
 
         <!-- What is wrong with this folder, right where its name is, and in one reading
@@ -265,26 +279,26 @@ const spaceTitle = computed(() => {
           :class="TONE_CLASSES[intent.tone]"
           :title="`${intent.label} is staged for this folder`"
         >
-          {{ intent.icon }} staged
+          <component :is="intent.icon" size="xs" /> staged
         </span>
 
         <span
           v-if="severity"
-          class="w-3 shrink-0 text-right text-[11px]"
+          class="flex w-4 shrink-0 justify-end text-[11px]"
           :class="severity.classes"
           :title="severityTitle"
           data-severity="own"
         >
-          {{ severity.glyph }}
+          <component :is="severity.icon" />
         </span>
         <span
           v-else-if="inheritedSeverity"
-          class="w-3 shrink-0 text-right text-[11px] opacity-40"
+          class="flex w-4 shrink-0 justify-end text-[11px] opacity-40"
           :class="inheritedSeverity.classes"
           title="Something inside this folder needs attention"
           data-severity="child"
         >
-          {{ inheritedSeverity.glyph }}
+          <component :is="inheritedSeverity.icon" />
         </span>
       </div>
     </th>
@@ -328,7 +342,7 @@ const spaceTitle = computed(() => {
       :class="node.lowSpace ? 'text-drift' : 'text-muted'"
       :title="spaceTitle"
     >
-      <span v-if="node.lowSpace" data-low-space="true">⚠ </span>
+      <IconWarning v-if="node.lowSpace" data-low-space="true" class="mr-0.5" />
       {{ node.freeSpace === null ? '—' : formatBytes(node.freeSpace) }}
     </td>
 

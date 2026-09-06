@@ -5,6 +5,8 @@ import PathOwnerCard from './PathOwnerCard.vue';
 import { initialsOf } from '@/lib/format';
 import { KIND_CLASSES, ownerHeadline, ownerMedia, USE_CLASSES } from '@/lib/path-matrix';
 import { stagedIntent, TONE_CLASSES } from '@/lib/staging';
+import IconUnknown from '@/components/base/icons/IconUnknown.vue';
+import IconWarning from '@/components/base/icons/IconWarning.vue';
 
 /**
  * Which instances use this folder - the column that replaced a grid of mostly-empty cells.
@@ -167,16 +169,22 @@ onBeforeUnmount(clearTimers);
           · {{ ownerMedia(owner).value }}
         </span>
 
-        <span v-if="owner.use === 'rootFolder' && owner.accessible === false" class="text-[10px]">⚠</span>
+        <IconWarning
+          v-if="owner.use === 'rootFolder' && owner.accessible === false"
+          size="md"
+        />
       </button>
 
       <template v-if="owners.length === 0">
         <span class="text-[11px] text-faint">—</span>
         <!-- Only where "nobody" could be wrong. A row that already has an owner does not
              need the caveat repeated on it; the notice above the table covers the rest. -->
-        <span v-if="unknownCount > 0" class="font-mono text-[11px] text-danger/70" :title="unknownTitle">
-          ?
-        </span>
+        <IconUnknown
+          v-if="unknownCount > 0"
+          size="xs"
+          class="text-danger/70"
+          :title="unknownTitle"
+        />
       </template>
     </div>
 

@@ -5,6 +5,9 @@ import BaseModal from '@/components/base/BaseModal.vue';
 import { useMatrixStore } from '@/stores/matrix';
 import { useQueueStore, type RemapTarget } from '@/stores/queue';
 import { useUiStore } from '@/stores/ui';
+import IconCreate from '@/components/base/icons/IconCreate.vue';
+import IconWarning from '@/components/base/icons/IconWarning.vue';
+import BaseCheckbox from '@/components/base/BaseCheckbox.vue';
 
 const props = defineProps<{ fromPath: string }>();
 const emit = defineEmits<{ close: [] }>();
@@ -141,10 +144,8 @@ watch(candidates, () => void loadCounts());
               class="flex items-center justify-between gap-3 rounded border border-line bg-raised/60 px-2.5 py-1.5 text-xs"
             >
               <span class="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  :checked="included.includes(candidate.instanceId)"
-                  class="accent-[var(--color-accent)]"
+                <BaseCheckbox
+                  :model-value="included.includes(candidate.instanceId)"
                   @change="toggle(candidate.instanceId)"
                 />
                 {{ candidate.name }}
@@ -156,7 +157,7 @@ watch(candidates, () => void loadCounts());
                   class="rounded border border-sync/40 bg-sync/10 px-1.5 py-0.5 text-sync"
                   title="The destination root folder will be created here first"
                 >
-                  + root folder
+                  <IconCreate size="xs" /> root folder
                 </span>
                 <span class="text-muted">
                   <template v-if="counts[candidate.instanceId] === 'loading'">counting…</template>
@@ -173,18 +174,13 @@ watch(candidates, () => void loadCounts());
 
       <div class="space-y-2 rounded-md border border-line bg-raised/40 px-3 py-2.5">
         <label class="flex items-start gap-2 text-xs">
-          <input
-            v-model="moveFiles"
-            type="checkbox"
-            data-testid="move-files"
-            class="mt-0.5 accent-[var(--color-danger)]"
-          />
+          <BaseCheckbox v-model="moveFiles" data-testid="move-files" tone="danger" class="mt-0.5" />
           <span>
             <span class="font-medium text-ink">Move the files on disk</span>
             <span class="block text-[11px] leading-relaxed text-muted">
               <template v-if="moveFiles">
                 <span class="text-danger">
-                  ⚠ *Arr will physically relocate {{ totalMedia }} item(s). This is slow, needs free
+                  <IconWarning /> *Arr will physically relocate {{ totalMedia }} item(s). This is slow, needs free
                   space at the destination, and cannot be undone by ArrRanger.
                 </span>
               </template>
@@ -197,12 +193,7 @@ watch(candidates, () => void loadCounts());
         </label>
 
         <label class="flex items-start gap-2 text-xs">
-          <input
-            v-model="removeOld"
-            type="checkbox"
-            data-testid="remove-old"
-            class="mt-0.5 accent-[var(--color-accent)]"
-          />
+          <BaseCheckbox v-model="removeOld" data-testid="remove-old" class="mt-0.5" />
           <span>
             <span class="font-medium text-ink">Remove {{ props.fromPath }} afterwards</span>
             <span class="block text-[11px] leading-relaxed text-muted">

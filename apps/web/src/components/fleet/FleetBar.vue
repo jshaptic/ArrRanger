@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import BaseButton from '@/components/base/BaseButton.vue';
 import { formatRelativeTime, initialsOf } from '@/lib/format';
 import { useMatrixStore } from '@/stores/matrix';
+import IconUnknown from '@/components/base/icons/IconUnknown.vue';
 
 /**
  * `target` - the selection is what batch actions fan out across (tags, import lists).
@@ -118,7 +119,7 @@ function chipClasses(instanceId: number, status: 'ok' | 'error' | 'loading'): st
 
     <p v-if="matrix.failedColumns.length > 0" class="mt-2 text-[11px] text-danger">
       {{ matrix.failedColumns.length }} instance(s) did not answer - they show
-      <span class="font-mono">?</span> {{ copy.unreachable }}
+      <IconUnknown size="xs" /><span class="sr-only">unknown</span> {{ copy.unreachable }}
     </p>
   </section>
 </template>
