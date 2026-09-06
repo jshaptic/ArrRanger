@@ -119,14 +119,16 @@ const media = computed(() => mediaSummary(props.node));
 /**
  * The badges that still need words.
  *
- * `mount` drives behaviour (a mount is never renameable) and the leading slash already
- * says it. `rootFolder` is now the folder's *colour*: it is the single most common state
- * in the table, on every row the view is organised around, and a green name says it
- * without spending a badge - which leaves the badge row meaning "something is off here".
+ * `mount` and `rootFolder` are the folder's colour: a blue name is a filesystem
+ * mount, a green name is a root folder. A badge there would repeat the thing the
+ * row is organised around. That leaves the badge row meaning "something is off here".
  */
 const badges = computed(() =>
   props.node.flags.filter((flag) => flag !== 'mount' && flag !== 'rootFolder'),
 );
+
+const isMount = computed(() => props.node.flags.includes('mount'));
+const isRootFolder = computed(() => props.node.flags.includes('rootFolder'));
 
 const severity = computed(() => SEVERITY_STYLES[props.node.severity]);
 
@@ -174,13 +176,13 @@ const twistyIcon = computed<Component>(() => {
  */
 const twistyTitle = computed(() => {
   if (props.loading) return 'Reading…';
-  if (props.node.flags.includes('rootFolder')) return 'Root folders are not expanded here';
+  if (isRootFolder.value) return 'Root folders are not expanded here';
   if (!props.node.expandable) return 'Nothing to expand here';
   return props.expanded ? 'Collapse' : 'Expand';
 });
 
 /** A root folder is a leaf on purpose - the chevron stays, it just is not a control. */
-const rootFolderLeaf = computed(() => props.node.flags.includes('rootFolder'));
+const rootFolderLeaf = computed(() => isRootFolder.value);
 
 /**
  * A top-level row is a mount or a root folder this container cannot see; either way the
@@ -194,20 +196,40 @@ const nameClasses = computed(() => {
   const classes: string[] = [];
   // Dimmed rather than hidden: this folder is the route to a match, not a match.
   if (props.onTheWay === true) classes.push('opacity-45');
+  // A mount is a section header: few of them, and everything below sits on that disk.
+  if (isMount.value) classes.push('font-semibold');
 
   if (!props.node.exists || intent.value?.tone === 'destroy') {
     return [...classes, 'text-danger', 'line-through'];
   }
-  // The badge this replaced. Colour scales where a badge does not: a fleet of 79 root
-  // folders used to be 79 identical chips saying the thing the row is about.
-  return [...classes, props.node.flags.includes('rootFolder') ? 'text-sync' : 'text-ink'];
+  // The badges these replaced. Colour scales where a chip does not: a fleet of 79 root
+  // folders used to be 79 identical chips saying the thing the row is about. A mount
+  // is rarer, so the same idea (colour the name) plus weight is enough to scan for.
+  if (isRootFolder.value) return [...classes, 'text-sync'];
+  if (isMount.value) return [...classes, 'text-accent'];
+  return [...classes, 'text-ink'];
+});
+
+/**
+ * A mount row is a faint band, so a long tree still shows where one filesystem ends
+ * and the next begins. Selected wins: the accent wash is the stronger "this one".
+ */
+const rowClasses = computed(() => {
+  if (props.selected) return 'bg-accent/5';
+  return isMount.value ? 'bg-raised hover:bg-overlay' : 'hover:bg-raised/40';
+});
+
+const pathCellClasses = computed(() => {
+  if (props.selected) return 'bg-[#16202b]';
+  return isMount.value ? 'bg-raised' : 'bg-surface';
 });
 
 /** The disk facts that do not earn a column of their own, in one tooltip. */
 const diskTitle = computed(() => {
   const lines = [props.node.path];
   if (props.onTheWay === true) lines.push('on the way to a match - it does not match the filter itself');
-  if (props.node.flags.includes('rootFolder')) lines.push('a root folder - hence the green name');
+  if (isMount.value) lines.push('a configured filesystem mount - hence the blue name');
+  if (isRootFolder.value) lines.push('a root folder - hence the green name');
   if (props.node.modifiedAt !== null) lines.push(`modified ${formatRelativeTime(props.node.modifiedAt)}`);
   if (props.node.exists && props.node.inScope) {
     lines.push(props.node.readable ? (props.node.writable ? 'read-write' : 'read-only') : 'no read access');
@@ -240,13 +262,14 @@ const treeIndent = computed(() =>
 <template>
   <tr
     class="group"
-    :class="selected ? 'bg-accent/5' : 'hover:bg-raised/40'"
+    :class="rowClasses"
     :data-path="node.path"
+    :data-mount="isMount ? 'true' : undefined"
   >
     <th
       scope="row"
       class="sticky left-0 z-10 border-b border-line px-3 py-1.5 text-left font-normal"
-      :class="selected ? 'bg-[#16202b]' : 'bg-surface'"
+      :class="pathCellClasses"
     >
       <div class="flex items-center gap-1.5">
         <BaseCheckbox
@@ -301,6 +324,19 @@ const treeIndent = computed(() =>
               :title="diskTitle"
             >
               {{ label }}
+            </span>
+
+            <!-- Free space is a filesystem fact, so it lives on the mount, not in a
+                 column that would repeat the same number on every child. -->
+            <span
+              v-if="isMount && node.freeSpace !== null"
+              data-free-space
+              class="shrink-0 font-mono text-[11px] whitespace-nowrap"
+              :class="node.lowSpace ? 'text-drift' : 'text-faint'"
+              :title="spaceTitle"
+            >
+              <IconWarning v-if="node.lowSpace" data-low-space="true" class="mr-0.5" />
+              {{ formatBytes(node.freeSpace) }} free
             </span>
 
             <!-- Staged work and the glyph stay by the name. Word badges sit after the
@@ -408,15 +444,6 @@ const treeIndent = computed(() =>
 
     <td class="border-b border-l border-line px-2 py-1.5 text-[11px] whitespace-nowrap text-faint">
       {{ node.modifiedAt === null ? '—' : formatRelativeTime(node.modifiedAt) }}
-    </td>
-
-    <td
-      class="border-b border-l border-line px-2 py-1.5 font-mono text-[11px] whitespace-nowrap"
-      :class="node.lowSpace ? 'text-drift' : 'text-muted'"
-      :title="spaceTitle"
-    >
-      <IconWarning v-if="node.lowSpace" data-low-space="true" class="mr-0.5" />
-      {{ node.freeSpace === null ? '—' : formatBytes(node.freeSpace) }}
     </td>
   </tr>
 </template>

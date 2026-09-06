@@ -444,9 +444,18 @@ describe('PathMatrixView', () => {
     expect(rowFor(wrapper, 'tv')?.find('[data-icon="warning"]').exists()).toBe(true);
   });
 
-  it('never renders a mount badge - the leading slash already says it', async () => {
+  it('marks a filesystem mount by the colour of the name, not with a badge', async () => {
     const wrapper = await mountView();
-    expect(rowAt(wrapper, '/data').text()).not.toContain('mount');
+    const row = rowAt(wrapper, '/data');
+
+    // Same idea as a root folder: colour the name. A badge would just say "mount"
+    // on the one row that already is the filesystem this view is hanging from.
+    expect(row.text()).not.toContain('mount');
+    expect(row.attributes('data-mount')).toBe('true');
+    expect(row.find('[data-name]').classes()).toContain('text-accent');
+    expect(row.find('[data-name]').classes()).toContain('font-semibold');
+    expect(row.classes()).toContain('bg-raised');
+    expect(rowAt(wrapper, '/data/media/movies').attributes('data-mount')).toBeUndefined();
   });
 
   it('says root folder with the colour of the name, not with a badge', async () => {
@@ -466,6 +475,7 @@ describe('PathMatrixView', () => {
 
     expect(wrapper.findAll('thead th').map((cell) => cell.text())).not.toContain('State');
     expect(wrapper.findAll('thead th').map((cell) => cell.text())).not.toContain('Row actions');
+    expect(wrapper.findAll('thead th').map((cell) => cell.text())).not.toContain('Free');
 
     // Glyph stays by the name; word badges sit after the row actions, still in the path cell.
     const row = rowAt(wrapper, '/data/media/old-movies');
@@ -564,14 +574,51 @@ describe('PathMatrixView', () => {
     expect(chips.every((chip) => chip.attributes('data-owner') === 'rootFolder')).toBe(true);
   });
 
-  it('summarises free space per filesystem, not per instance', async () => {
+  it('states free space on the mount, not in a column or a per-instance total', async () => {
     const wrapper = await mountView();
 
     // The old footer summed each instance's root folders, double-counting one disk when
-    // two instances rooted on it.
+    // two instances rooted on it. A Free column then repeated the same figure on every
+    // child. The mount is the filesystem, so the number sits next to its name.
     expect(wrapper.find('tfoot').exists()).toBe(false);
+    expect(wrapper.findAll('thead th').map((cell) => cell.text())).not.toContain('Free');
+    expect(wrapper.find('[data-testid="filesystem-space"]').exists()).toBe(false);
 
+    const mount = rowAt(wrapper, '/data');
+    expect(mount.find('[data-free-space]').text()).toMatch(/free/);
+    expect(rowAt(wrapper, '/data/media').find('[data-free-space]').exists()).toBe(false);
+    expect(rowAt(wrapper, '/data/media/movies').find('[data-free-space]').exists()).toBe(false);
+  });
+
+  it('keeps a free-space strip when no mount row is in view', async () => {
+    matrixApi.mockImplementationOnce(() =>
+      Promise.resolve<PathMatrixResponse>({
+        enabled: true,
+        scannedAt: '2026-09-01T00:00:00.000Z',
+        roots: [
+          {
+            path: '/data',
+            exists: true,
+            readable: true,
+            writable: true,
+            deviceId: '1',
+            freeSpace: 2_000_000_000,
+            totalSpace: 8_000_000_000,
+            error: null,
+          },
+        ],
+        columns: [],
+        // A focused subtree, or the flat list: the mount itself is not a row.
+        levels: [level(null, [MEDIA])],
+        totals: { rootFolderPaths: 0, unseenRootFolders: 0, unmanaged: 0, untracked: 0, missing: 0 },
+        mismatches: [],
+      }),
+    );
+
+    const wrapper = await mountView();
     const strip = wrapper.find('[data-testid="filesystem-space"]');
+
+    expect(wrapper.find('[data-path="/data"]').exists()).toBe(false);
     expect(strip.exists()).toBe(true);
     expect(strip.text()).toContain('/data');
     expect(strip.text()).toContain('free');

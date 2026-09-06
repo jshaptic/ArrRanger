@@ -243,7 +243,9 @@ const operationAlignTargets = computed(() =>
 );
 
 /**
- * Free space is a property of a filesystem, not of an instance.
+ * Free space is a property of a filesystem, not of an instance. The number lives on
+ * the mount row. This strip is only the fallback for a view that has no mount in it
+ * - the flat list, or a focused subtree - so the figure does not vanish.
  *
  * The old footer summed each instance's root folders' free space, which double-counted
  * the same disk whenever two instances rooted on one mount. One line per mount instead.
@@ -261,6 +263,8 @@ const filesystems = computed(() =>
           : Math.round((root.freeSpace / root.totalSpace) * 100),
     })),
 );
+
+const mountInView = computed(() => paths.rows.some((row) => row.node.flags.includes('mount')));
 
 // The fleet bar is a filter here, not an action target: selecting instances narrows the
 // tree to their folders. Scoping is server-side, because the spine itself is built from
@@ -347,9 +351,9 @@ environment:
         </p>
       </section>
 
-      <!-- free space, per filesystem: the number a mount has, not one per instance -->
+      <!-- free space, per filesystem: only when no mount row is on screen to carry it -->
       <div
-        v-if="filesystems.length > 0"
+        v-if="filesystems.length > 0 && !mountInView"
         class="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-line bg-raised/40 px-3 py-2 text-[11px]"
         data-testid="filesystem-space"
       >
@@ -558,7 +562,7 @@ environment:
                     <!-- Same width as the row twisty, so "Path" lines up with depth-0 names. -->
                     <span v-if="!paths.flatView" class="w-4 shrink-0" aria-hidden="true"></span>
                     <span
-                      title="A root folder is green. What is wrong with a folder is stated at the right of this column, next to the name it describes"
+                      title="A filesystem mount is blue, and carries that disk's free space. A root folder is green. What is wrong with a folder is stated at the right of this column, next to the name it describes"
                     >
                       Path
                     </span>
@@ -578,12 +582,6 @@ environment:
                 </th>
                 <th class="border-b border-l border-line bg-raised px-2 py-2 text-left text-[11px] font-semibold text-muted">
                   Modified
-                </th>
-                <th
-                  class="border-b border-l border-line bg-raised px-2 py-2 text-left text-[11px] font-semibold text-muted"
-                  title="Free space on the filesystem this folder is on"
-                >
-                  Free
                 </th>
               </tr>
             </thead>

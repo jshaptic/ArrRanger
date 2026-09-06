@@ -101,8 +101,9 @@ Staged work and the severity glyph stay beside the name. There is no State colum
 
 `untracked` stays `info` - it fires on every non-media folder. A collapsed row shows a
 dimmed warning for worse below. Free space is per filesystem, never per instance: one
-`statfs` per device id per request, seeded from `FS_ROOTS`. A low-space warning only
-ever lands on a **mount or a root folder**. Never restore a per-instance total.
+`statfs` per device id per request, seeded from `FS_ROOTS`. The number sits on the
+mount row, not in a column. A low-space warning only ever lands on a **mount or a
+root folder**. Never restore a per-instance total.
 
 ### Filters
 
