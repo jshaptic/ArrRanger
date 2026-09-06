@@ -38,8 +38,7 @@ npm test # server integration + web component/store tests
 
 ## Visual language
 
-In the matrices - tags and import lists - these five cell states are the only cues that
-carry meaning. Do not invent a sixth.
+The tag matrix is the only fleet-column grid. These five cell states are its only cues.
 
 | Cue | Meaning |
 |---|---|
@@ -49,17 +48,17 @@ carry meaning. Do not invent a sixth.
 | violet ring + glyph | a staged operation is pending for this cell |
 | red unknown icon | that instance did not answer - unknown, deliberately *not* "missing" |
 
-The last is enforced in `buildTagRows` / `buildRootFolderRows` (`cell.known`). The folder
-view has no cells to colour: an unreachable instance is absent from every row's owners
-and the view says so once above the table, not per row.
+`cell.known` in `buildTagRows` enforces the last. Import lists and `/paths` drop the
+column axis: rows are lists or folders, instances are chips. Unreachable instances are
+absent from chips and stated once above the table, never as "missing". An instance
+without a list is simply absent - this view does not report parity or setting drift.
 
 ## The folder view (`/paths`)
 
-- **Rows are folders; instances are chips, not the axis.** The one place the fleet column
-  layout is dropped.
+- **Rows are folders; instances are chips, not the axis.**
 - **Root folders are leaves.** Never `readdir` below one - the library lives there.
 - **No parity or drift reporting here.** Each instance rooting at its own subfolder is a
-  normal layout; comparison is what the matrices are for.
+  normal layout; comparison is what the tag matrix is for.
 - **Root folders outside `FS_ROOTS`, or absent from disk, are rows** - marked
   `not mounted here` and struck through respectively, at any depth.
 - **`missing` means an instance holds a file for this path and the disk does not.** A

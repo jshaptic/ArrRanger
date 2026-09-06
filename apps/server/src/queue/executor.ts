@@ -389,8 +389,20 @@ export class QueueExecutor {
       { signal: base.signal, onTrace },
     );
 
+    const clientFor = (instanceId: number): { client: ArrClient; instance: typeof instance } => {
+      const peer = this.deps.instances.requireWithKey(instanceId);
+      return {
+        instance: peer,
+        client: new ArrClient(
+          peer,
+          { dispatcher: this.deps.dispatchers.get(peer) },
+          { signal: base.signal, onTrace },
+        ),
+      };
+    };
+
     const handler = arrHandlers[item.op as keyof typeof arrHandlers] as unknown as AnyArrHandler;
-    return handler({ ...base, client, instance }, item);
+    return handler({ ...base, client, instance, clientFor }, item);
   }
 
   /** Disk work is traced into the same audit trail as an HTTP exchange. */

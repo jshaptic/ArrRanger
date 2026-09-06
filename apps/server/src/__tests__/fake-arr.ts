@@ -399,6 +399,19 @@ export async function startFakeArr(
       send(res, 200, state.importLists);
       return;
     }
+    if (method === 'POST' && path === '/importlist') {
+      const body = await readBody(req);
+      const id = Math.max(0, ...state.importLists.map((list) => list.id)) + 1;
+      const created = {
+        secretServerField: 'must-survive-put',
+        tags: [],
+        ...body,
+        id,
+      } as unknown as FakeImportList;
+      state.importLists.push(created);
+      send(res, 201, created);
+      return;
+    }
     if (method === 'GET' && /^\/importlist\/\d+$/.test(path)) {
       const id = Number(path.split('/')[2]);
       const list = state.importLists.find((l) => l.id === id);

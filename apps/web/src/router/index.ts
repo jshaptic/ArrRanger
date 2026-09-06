@@ -6,13 +6,13 @@ const routes: RouteRecordRaw[] = [
     path: '/tags',
     name: 'tags',
     component: () => import('@/views/TagMatrixView.vue'),
-    meta: { title: 'Tag parity matrix', hint: 'every tag, every instance, side by side' },
+    meta: { title: 'Tag management' },
   },
   {
     path: '/paths',
     name: 'paths',
     component: () => import('@/views/PathMatrixView.vue'),
-    meta: { title: 'Path matrix', hint: 'every folder, every instance, one table' },
+    meta: { title: 'Folder management' },
   },
   // The two views this replaced - keep the links working.
   { path: '/root-folders', redirect: '/paths' },
@@ -21,7 +21,7 @@ const routes: RouteRecordRaw[] = [
     path: '/import-lists',
     name: 'import-lists',
     component: () => import('@/views/ImportListFleetView.vue'),
-    meta: { title: 'Import list fleet', hint: 'compare and align list settings' },
+    meta: { title: 'List management' },
   },
   {
     path: '/queue',

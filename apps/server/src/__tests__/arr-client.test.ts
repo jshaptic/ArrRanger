@@ -121,6 +121,17 @@ describe('ArrClient', () => {
     assert.equal(list?.secretServerField, 'must-survive-put');
   });
 
+  test('import list POST creates a list from the raw body', async () => {
+    const client = clientFor(radarr);
+    const current = await client.getImportList(1);
+    const { id: _id, ...body } = current.raw;
+
+    const created = await client.createImportList({ ...body, name: 'Copied watchlist', tags: [] });
+    assert.equal(created.view.name, 'Copied watchlist');
+    assert.ok(created.view.id !== 1);
+    assert.equal(radarr.state.importLists.some((list) => list.name === 'Copied watchlist'), true);
+  });
+
   test('maps a 400 validation body to a readable message', async () => {
     await assert.rejects(
       () => clientFor(radarr).createTag(''),

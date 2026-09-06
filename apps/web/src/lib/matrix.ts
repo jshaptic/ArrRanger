@@ -4,8 +4,9 @@ import type { ArrImportList, ArrRootFolder, ArrTagDetail, Instance } from '@arrr
  * Fleet normalisation.
  *
  * Everything here is pure: instance snapshots in, comparison rows out. The views never
- * reason about a "current instance" - they render rows whose cells are aligned with the
- * fleet's column order, so parity, drift and gaps are visible in one pass.
+ * reason about a "current instance". Tag cells stay aligned with the fleet columns; import
+ * lists keep a per-instance cell model so chips and clone can see who already has the
+ * list (`lib/import-lists.ts`).
  */
 
 export type SnapshotStatus = 'loading' | 'ok' | 'error';
@@ -81,12 +82,6 @@ export interface ImportListRow {
   readonly implementation: string;
   readonly cells: readonly ImportListCell[];
   readonly presentOn: readonly number[];
-  readonly missingOn: readonly number[];
-  readonly parity: ParityState;
-  /** More than one distinct value across the fleet means the setting has drifted. */
-  readonly rootFolderDrift: boolean;
-  readonly qualityProfileDrift: boolean;
-  readonly enabledDrift: boolean;
 }
 
 export interface FleetStats {
@@ -243,8 +238,9 @@ export function buildImportListRows(snapshots: readonly InstanceSnapshot[]): Imp
       };
     });
 
-    const present = cells.filter((cell) => cell.known && cell.present);
-    const presentOn = present.map((cell) => cell.instanceId);
+    const presentOn = cells
+      .filter((cell) => cell.known && cell.present)
+      .map((cell) => cell.instanceId);
 
     return {
       key,
@@ -252,11 +248,6 @@ export function buildImportListRows(snapshots: readonly InstanceSnapshot[]): Imp
       implementation: sample.implementationName ?? sample.implementation,
       cells,
       presentOn,
-      missingOn: cells.filter((cell) => cell.known && !cell.present).map((cell) => cell.instanceId),
-      parity: parityOf(presentOn.length, healthy.length),
-      rootFolderDrift: new Set(present.map((cell) => cell.rootFolderPath)).size > 1,
-      qualityProfileDrift: new Set(present.map((cell) => cell.qualityProfileId)).size > 1,
-      enabledDrift: new Set(present.map((cell) => cell.enabled)).size > 1,
     };
   });
 

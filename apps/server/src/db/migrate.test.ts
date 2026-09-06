@@ -52,8 +52,8 @@ describe('migration 002', () => {
 
   test('keeps queue items and their audit trail through the table rebuild', () => {
     const result = runMigrations(db, MIGRATIONS_DIR);
-    assert.deepEqual(result.applied, ['002_filesystem.sql']);
-    assert.equal(result.schemaVersion, 2);
+    assert.deepEqual(result.applied, ['002_filesystem.sql', '003_import_list_create.sql']);
+    assert.equal(result.schemaVersion, 3);
 
     const item = db.prepare('SELECT * FROM queue_items WHERE id = 1').get() as {
       instance_id: number;
@@ -109,6 +109,18 @@ describe('migration 002', () => {
   test('is idempotent on a second boot', () => {
     const again = runMigrations(db, MIGRATIONS_DIR);
     assert.deepEqual(again.applied, []);
-    assert.equal(again.skipped, 2);
+    assert.equal(again.skipped, 3);
+  });
+
+  test('accepts importList.create', () => {
+    db.prepare(
+      `INSERT INTO queue_items (instance_id, kind, sort_order, op, target_kind, target_label, summary, payload)
+       VALUES (1, 'arr', 5, 'importList.create', 'importList', 'Trakt watchlist', 'Copy import list', '{}')`,
+    ).run();
+
+    const row = db.prepare("SELECT op FROM queue_items WHERE op = 'importList.create'").get() as {
+      op: string;
+    };
+    assert.equal(row.op, 'importList.create');
   });
 });

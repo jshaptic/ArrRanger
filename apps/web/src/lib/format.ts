@@ -43,7 +43,7 @@ export function pluralise(count: number, singular: string, plural = `${singular}
   return `${count} ${count === 1 ? singular : plural}`;
 }
 
-/** "Radarr-4K" -> "R4" - two-character column badges for the matrix headers. */
+/** "Radarr-4K" -> "R4" - two-character badges for instance chips and matrix headers. */
 export function initialsOf(name: string): string {
   const parts = name
     .split(/[\s\-_/]+/)

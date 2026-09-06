@@ -169,7 +169,7 @@ describe('root folder topology', () => {
 });
 
 describe('import list fleet', () => {
-  it('matches lists by name and flags setting drift', () => {
+  it('matches lists by name across instances', () => {
     const rows = buildImportListRows([
       snapshot(1, 'Radarr-4K', {
         importLists: [importList(1, 'Trakt watchlist', { rootFolderPath: '/data/media/movies-4k' })],
@@ -182,10 +182,8 @@ describe('import list fleet', () => {
     ]);
 
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.parity).toBe('full');
-    expect(rows[0]?.rootFolderDrift).toBe(true);
-    expect(rows[0]?.enabledDrift).toBe(true);
-    expect(rows[0]?.qualityProfileDrift).toBe(false);
+    expect(rows[0]?.name).toBe('Trakt watchlist');
+    expect(rows[0]?.presentOn).toEqual([1, 2]);
   });
 
   it('reads the auto-add flag from either flavour of the field', () => {

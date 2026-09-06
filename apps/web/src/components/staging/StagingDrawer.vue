@@ -36,7 +36,6 @@ function applyAll(): void {
 </script>
 
 <template>
-  <!-- GParted's pending-operations tray: always visible, never applies anything by itself. -->
   <section
     class="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-overlay/95 backdrop-blur"
     :class="ui.drawerOpen ? 'shadow-[0_-8px_30px_rgba(0,0,0,0.45)]' : ''"

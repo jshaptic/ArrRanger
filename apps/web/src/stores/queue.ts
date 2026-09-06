@@ -89,6 +89,8 @@ function stageKeysFor(item: QueueItem): string[] {
       return [stageKey(item.instanceId, 'rootFolder', item.payload.path)];
     case 'media.moveRootFolder':
       return [stageKey(item.instanceId, 'rootFolder', item.payload.toRootFolderPath)];
+    case 'importList.create':
+      return [stageKey(item.instanceId, 'importList', item.payload.name)];
     case 'importList.update':
     case 'importList.delete':
     case 'importList.setEnabled':
@@ -216,6 +218,10 @@ export const useQueueStore = defineStore('queue', () => {
 
   const stagedForImportList = (instanceId: number, listId: number): QueueItem[] =>
     stagedIndex.value.get(stageKey(instanceId, 'importList', String(listId))) ?? [];
+
+  /** A create has no dest id yet, so it is keyed by the list name. */
+  const stagedForImportListName = (instanceId: number, name: string): QueueItem[] =>
+    stagedIndex.value.get(stageKey(instanceId, 'importList', name)) ?? [];
 
   /** Staged disk work touching a path - drives the storage explorer badges. */
   const stagedForPath = (target: string): QueueItem[] =>
@@ -606,6 +612,28 @@ export const useQueueStore = defineStore('queue', () => {
     );
   }
 
+  function createImportListAcross(
+    targets: ReadonlyArray<{
+      instanceId: number;
+      name: string;
+      sourceInstanceId: number;
+      sourceImportListId: number;
+    }>,
+  ): Promise<QueueItem[]> {
+    return push(
+      targets.map((target) => ({
+        instanceId: target.instanceId,
+        op: 'importList.create' as const,
+        payload: {
+          name: target.name,
+          sourceInstanceId: target.sourceInstanceId,
+          sourceImportListId: target.sourceImportListId,
+        },
+      })),
+      `copy "${targets[0]?.name ?? 'import list'}" onto ${String(targets.length)} instance(s)`,
+    );
+  }
+
   // -------------------------------------------------------------- queue admin
 
   async function reorder(itemIds: readonly number[]): Promise<void> {
@@ -808,6 +836,7 @@ export const useQueueStore = defineStore('queue', () => {
     stagedForTag,
     stagedForRootFolder,
     stagedForImportList,
+    stagedForImportListName,
     stagedForPath,
     runProgress,
     currentItem,
@@ -825,6 +854,7 @@ export const useQueueStore = defineStore('queue', () => {
     remapRootFolder,
     setImportListEnabled,
     updateImportListsAcross,
+    createImportListAcross,
     stageFsOperation,
     stageReconcile,
     reorder,

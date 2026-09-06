@@ -1,29 +1,43 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import BaseButton from '@/components/base/BaseButton.vue';
+import BaseCheckbox from '@/components/base/BaseCheckbox.vue';
 import EmptyState from '@/components/base/EmptyState.vue';
 import FleetBar from '@/components/fleet/FleetBar.vue';
-import InstanceColumnHeader from '@/components/fleet/InstanceColumnHeader.vue';
-import ParityBadge from '@/components/fleet/ParityBadge.vue';
-import AlignRootFolderDialog from '@/components/imports/AlignRootFolderDialog.vue';
-import { stagedIntent, TONE_CLASSES } from '@/lib/staging';
+import AddImportListDialog from '@/components/imports/AddImportListDialog.vue';
+import ImportListInstanceChips from '@/components/imports/ImportListInstanceChips.vue';
+import IconImportList from '@/components/base/icons/IconImportList.vue';
+import { canCloneImportList, importListOwners } from '@/lib/import-lists';
+import type { ImportListRow } from '@/lib/matrix';
 import { useMatrixStore } from '@/stores/matrix';
 import { useQueueStore, type ImportListTarget } from '@/stores/queue';
-import IconImportList from '@/components/base/icons/IconImportList.vue';
-import IconAbsent from '@/components/base/icons/IconAbsent.vue';
-import BaseCheckbox from '@/components/base/BaseCheckbox.vue';
 
 const matrix = useMatrixStore();
 const queue = useQueueStore();
 
+const search = ref('');
 const selectedKeys = ref<string[]>([]);
-const aligning = ref<{ targets: ImportListTarget[]; names: string[] } | null>(null);
+const cloning = ref<ImportListRow | null>(null);
 
-const targets = computed(() => matrix.targetInstanceIds);
+const rows = computed(() => {
+  const needle = search.value.trim().toLowerCase();
+  if (needle.length === 0) return matrix.importListRows;
+  return matrix.importListRows.filter((row) => row.name.toLowerCase().includes(needle));
+});
 
 const selectedRows = computed(() =>
-  matrix.importListRows.filter((row) => selectedKeys.value.includes(row.key)),
+  rows.value.filter((row) => selectedKeys.value.includes(row.key)),
 );
+
+const allVisibleSelected = computed(
+  () => rows.value.length > 0 && selectedRows.value.length === rows.value.length,
+);
+
+const someVisibleSelected = computed(
+  () => !allVisibleSelected.value && selectedRows.value.length > 0,
+);
+
+const targets = computed(() => matrix.targetInstanceIds);
 
 /** Every present list on a targeted instance, for the selected rows. */
 const selectedTargets = computed<ImportListTarget[]>(() =>
@@ -40,16 +54,39 @@ function toggleRow(key: string): void {
     : [...selectedKeys.value, key];
 }
 
-function instanceName(instanceId: number): string {
-  return (
-    matrix.columns.find((column) => column.instance.id === instanceId)?.instance.name ??
-    `instance ${String(instanceId)}`
-  );
+function toggleAllVisible(): void {
+  selectedKeys.value = allVisibleSelected.value ? [] : rows.value.map((row) => row.key);
+}
+
+function ownersOf(row: ImportListRow) {
+  return importListOwners(row, matrix.columns);
+}
+
+function pendingOf(row: ImportListRow) {
+  return matrix.columns.flatMap((column) => {
+    if (column.status !== 'ok' || row.presentOn.includes(column.instance.id)) return [];
+    if (queue.stagedForImportListName(column.instance.id, row.name).length === 0) return [];
+    return [
+      {
+        instanceId: column.instance.id,
+        name: column.instance.name,
+        kind: column.instance.kind,
+      },
+    ];
+  });
 }
 
 async function setEnabled(enabled: boolean): Promise<void> {
   await queue.setImportListEnabled(selectedTargets.value, enabled, enabled);
   selectedKeys.value = [];
+}
+
+async function setOwnerEnabled(target: {
+  instanceId: number;
+  importListId: number;
+  enabled: boolean;
+}): Promise<void> {
+  await queue.setImportListEnabled([target], target.enabled, target.enabled);
 }
 
 onMounted(() => {
@@ -62,11 +99,18 @@ onMounted(() => {
     <FleetBar />
 
     <div class="flex flex-wrap items-center gap-2">
+      <input
+        v-model="search"
+        type="search"
+        placeholder="Filter lists…"
+        class="h-9 w-48 rounded-md border border-line bg-raised px-3 text-sm text-ink outline-none focus:border-accent"
+      />
+
       <span v-if="selectedTargets.length > 0" class="text-xs text-staged">
         {{ selectedRows.length }} list(s) · {{ selectedTargets.length }} instance-level operation(s)
       </span>
       <span v-else class="text-xs text-muted">
-        Select rows to enable, disable or align them across the fleet
+        Select rows to enable or disable them across the fleet
       </span>
 
       <div class="ml-auto flex flex-wrap items-center gap-2">
@@ -85,159 +129,108 @@ onMounted(() => {
         >
           Disable
         </BaseButton>
-        <BaseButton
-          size="sm"
-          :disabled="selectedTargets.length === 0"
-          @click="
-            aligning = {
-              targets: selectedTargets,
-              names: selectedRows.map((row) => row.name),
-            }
-          "
-        >
-          Align root folder…
-        </BaseButton>
       </div>
     </div>
 
     <EmptyState
-      v-if="matrix.importListRows.length === 0"
-      :title="matrix.loading ? 'Loading the fleet…' : 'No import lists found'"
-      description="Import lists are compared by name across instances. Creating a new list still happens in Radarr/Sonarr - ArrRanger keeps the ones you have consistent."
+      v-if="matrix.columns.length === 0"
+      title="No instances connected"
+      description="Import lists come from every connected Radarr and Sonarr. Add a list on one instance, then copy it onto others from here."
       :icon="IconImportList"
     />
 
-    <div v-else class="overflow-x-auto rounded-lg border border-line">
-      <table class="w-full border-collapse text-xs">
-        <thead>
-          <tr>
-            <th
-              scope="col"
-              class="sticky left-0 z-20 min-w-[18rem] border-b border-line bg-raised px-3 py-2 text-left text-[11px] font-semibold text-muted"
-            >
-              Import list ({{ matrix.importListRows.length }})
-            </th>
-            <InstanceColumnHeader
-              v-for="column in matrix.columns"
-              :key="column.instance.id"
-              :column="column"
-            />
-          </tr>
-        </thead>
+    <EmptyState
+      v-else-if="rows.length === 0"
+      :title="matrix.loading ? 'Loading the fleet…' : 'No import lists match this filter'"
+      :description="
+        matrix.loading
+          ? 'Reading import lists from every instance in parallel.'
+          : 'Clear the filter, or add a list in Radarr/Sonarr and refresh the fleet.'
+      "
+      :icon="IconImportList"
+    />
 
-        <tbody>
-          <tr
-            v-for="row in matrix.importListRows"
-            :key="row.key"
-            :class="selectedKeys.includes(row.key) ? 'bg-accent/5' : 'hover:bg-raised/40'"
-          >
-            <th
-              scope="row"
-              class="sticky left-0 z-10 border-b border-line px-3 py-1.5 text-left font-normal"
-              :class="selectedKeys.includes(row.key) ? 'bg-[#16202b]' : 'bg-surface'"
-            >
-              <label class="flex items-center gap-2">
-                <BaseCheckbox
-                  :model-value="selectedKeys.includes(row.key)"
-                  @change="toggleRow(row.key)"
-                />
-                <span class="min-w-0 flex-1">
-                  <span class="block truncate text-ink">{{ row.name }}</span>
-                  <span class="block truncate text-[10px] text-faint">{{ row.implementation }}</span>
-                </span>
-                <span class="flex shrink-0 flex-col items-end gap-1">
-                  <ParityBadge
-                    :parity="row.parity"
-                    :present-on="row.presentOn.length"
-                    :total="matrix.healthyColumns.length"
+    <div v-else class="space-y-2">
+      <p
+        v-if="matrix.failedColumns.length > 0"
+        class="text-[11px] text-danger"
+        data-testid="unknown-instances"
+      >
+        {{ matrix.failedColumns.length }} instance(s) did not answer
+        ({{ matrix.failedColumns.map((column) => column.instance.name).join(', ') }}) - the
+        Instances column below is incomplete for them. Unknown, deliberately not "missing".
+      </p>
+
+      <div class="overflow-x-auto rounded-lg border border-line">
+        <table class="w-full border-collapse text-xs">
+          <thead>
+            <tr>
+              <th
+                scope="col"
+                class="sticky left-0 z-20 min-w-[22rem] border-b border-line bg-raised px-3 py-2 text-left"
+              >
+                <label class="flex items-center gap-2 text-[11px] font-semibold text-muted">
+                  <BaseCheckbox
+                    :model-value="allVisibleSelected"
+                    :indeterminate="someVisibleSelected"
+                    @change="toggleAllVisible()"
                   />
-                  <span class="flex gap-1">
-                    <span
-                      v-if="row.rootFolderDrift"
-                      class="rounded border border-drift/40 bg-drift/10 px-1 py-0.5 text-[9px] text-drift"
-                      title="These lists point at different root folders"
-                    >
-                      path drift
-                    </span>
-                    <span
-                      v-if="row.qualityProfileDrift"
-                      class="rounded border border-drift/40 bg-drift/10 px-1 py-0.5 text-[9px] text-drift"
-                      title="These lists use different quality profiles"
-                    >
-                      profile drift
-                    </span>
-                    <span
-                      v-if="row.enabledDrift"
-                      class="rounded border border-drift/40 bg-drift/10 px-1 py-0.5 text-[9px] text-drift"
-                      title="Enabled on some instances, disabled on others"
-                    >
-                      state drift
-                    </span>
-                  </span>
-                </span>
-              </label>
-            </th>
+                  Import list ({{ rows.length }})
+                </label>
+              </th>
+              <th
+                scope="col"
+                class="border-b border-l border-line bg-raised px-3 py-2 text-left text-[11px] font-semibold text-muted"
+              >
+                Instances
+              </th>
+            </tr>
+          </thead>
 
-            <td
-              v-for="cell in row.cells"
-              :key="cell.instanceId"
-              class="border-b border-l border-line p-1 text-center"
+          <tbody>
+            <tr
+              v-for="row in rows"
+              :key="row.key"
+              :class="selectedKeys.includes(row.key) ? 'bg-accent/5' : 'hover:bg-raised/40'"
             >
-              <div
-                v-if="!cell.known"
-                class="flex h-11 items-center justify-center rounded border border-danger/30 bg-danger/5 font-mono text-xs text-danger/60"
-                :title="`${instanceName(cell.instanceId)}: instance did not answer`"
+              <th
+                scope="row"
+                class="sticky left-0 z-10 border-b border-line px-3 py-1.5 text-left font-normal"
+                :class="selectedKeys.includes(row.key) ? 'bg-[#16202b]' : 'bg-surface'"
               >
-                ?
-              </div>
-              <div
-                v-else-if="cell.present"
-                class="flex h-11 flex-col items-center justify-center gap-0.5 rounded border text-[10px]"
-                :class="
-                  stagedIntent(queue.stagedForImportList(cell.instanceId, cell.listId ?? 0))
-                    ? TONE_CLASSES[
-                        stagedIntent(queue.stagedForImportList(cell.instanceId, cell.listId ?? 0))!
-                          .tone
-                      ] + ' ring-1 ring-inset ring-current/30'
-                    : 'border-line bg-raised/60'
-                "
-                :title="`${instanceName(cell.instanceId)} · ${cell.rootFolderPath || 'no root folder'} · profile ${cell.qualityProfileId}`"
-              >
-                <span class="flex items-center gap-1">
-                  <span :class="cell.enabled ? 'text-sync' : 'text-faint'">
-                    {{ cell.enabled ? 'on' : 'off' }}
+                <label class="flex items-center gap-2">
+                  <BaseCheckbox
+                    :model-value="selectedKeys.includes(row.key)"
+                    @change="toggleRow(row.key)"
+                  />
+                  <span class="min-w-0 flex-1">
+                    <span data-name class="block truncate text-ink">{{ row.name }}</span>
+                    <span class="block truncate text-[10px] text-faint">{{ row.implementation }}</span>
                   </span>
-                  <span v-if="cell.autoAdd" class="text-accent" title="Automatic add is enabled">
-                    auto
-                  </span>
-                </span>
-                <span class="max-w-[7rem] truncate font-mono text-[9px] text-muted">
-                  {{ cell.rootFolderPath || '—' }}
-                </span>
-              </div>
-              <div
-                v-else
-                class="flex h-11 items-center justify-center rounded border border-dashed border-line-strong text-xs text-faint"
-                :title="`${instanceName(cell.instanceId)}: this list does not exist here`"
-              >
-                <IconAbsent size="sm" />
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+                </label>
+              </th>
+
+              <ImportListInstanceChips
+                :owners="ownersOf(row)"
+                :row="row"
+                :unknown-count="matrix.failedColumns.length"
+                :can-add="canCloneImportList(row, matrix.columns)"
+                :staged="queue.stagedForImportList"
+                :pending="pendingOf(row)"
+                @set-enabled="setOwnerEnabled"
+                @add="cloning = row"
+              />
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <p class="text-[11px] leading-relaxed text-muted">
       Quality profile ids are shown raw: profile names live behind an endpoint ArrRanger does not
-      read yet, so aligning profiles across instances is deliberately left out rather than guessed.
+      read yet, so they are copied as-is and never guessed.
     </p>
 
-    <AlignRootFolderDialog
-      v-if="aligning"
-      :targets="aligning.targets"
-      :names="aligning.names"
-      @close="aligning = null"
-    />
+    <AddImportListDialog v-if="cloning" :row="cloning" @close="cloning = null" />
   </div>
 </template>
