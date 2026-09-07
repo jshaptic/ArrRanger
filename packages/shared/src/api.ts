@@ -1,4 +1,4 @@
-import type { ArrImportList, ArrMedia, ArrRootFolder, ArrTagDetail } from './arr.js';
+import type { ArrImportList, ArrMedia, ArrQualityProfile, ArrRootFolder, ArrTagDetail } from './arr.js';
 import type { ConnectionTestResult, Instance } from './instance.js';
 import type { NewQueueItem, QueueItem, QueueItemStatus } from './queue.js';
 import type { OnErrorPolicy, QueueEvent, QueueRun } from './run.js';
@@ -36,6 +36,7 @@ export interface ResourceSnapshotResponse {
   readonly tags: readonly ArrTagDetail[];
   readonly rootFolders: readonly ArrRootFolder[];
   readonly importLists: readonly ArrImportList[];
+  readonly qualityProfiles: readonly ArrQualityProfile[];
 }
 
 export interface MediaListResponse {

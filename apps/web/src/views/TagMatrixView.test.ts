@@ -95,6 +95,7 @@ vi.mock('@/api/resources', () => ({
         tags: SNAPSHOTS[instanceId]?.tags ?? [],
         rootFolders: [],
         importLists: [],
+        qualityProfiles: [],
       }),
     media: vi.fn(),
     allMediaIdsInRootFolder: vi.fn(),

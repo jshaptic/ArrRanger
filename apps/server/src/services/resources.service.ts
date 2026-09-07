@@ -1,11 +1,13 @@
 import {
   arrImportListSchema,
   arrMediaSchema,
+  arrQualityProfileSchema,
   arrRootFolderSchema,
   arrTagDetailSchema,
   type ArrImportList,
   type ArrJson,
   type ArrMedia,
+  type ArrQualityProfile,
   type ArrRootFolder,
   type ArrTagDetail,
   type InstanceWithKey,
@@ -60,11 +62,11 @@ export class ResourcesService {
     return { payload: raw.map(parse), fetchedAt: stored.fetchedAt };
   }
 
-  /** Tags, root folders and import lists in one round trip - what the editor grids need. */
+  /** Tags, root folders, import lists and quality profiles in one round trip. */
   async getResources(instanceId: number, refresh = false): Promise<ResourceSnapshotResponse> {
     const instance = this.deps.instances.requireWithKey(instanceId);
 
-    const [tags, rootFolders, importLists] = await Promise.all([
+    const [tags, rootFolders, importLists, qualityProfiles] = await Promise.all([
       this.cached<ArrTagDetail>(
         instance,
         'tagDetail',
@@ -86,11 +88,20 @@ export class ResourcesService {
         async (client) => (await client.listImportLists()).map((entry) => entry.raw),
         (raw) => arrImportListSchema.parse(raw),
       ),
+      this.cached<ArrQualityProfile>(
+        instance,
+        'qualityProfile',
+        refresh,
+        async (client) => (await client.listQualityProfiles()).map((entry) => entry.raw),
+        (raw) => arrQualityProfileSchema.parse(raw),
+      ),
     ]);
 
-    // The oldest of the three is the honest "as of" for the whole view.
+    // The oldest of the four is the honest "as of" for the whole view.
     const fetchedAt =
-      [tags.fetchedAt, rootFolders.fetchedAt, importLists.fetchedAt].sort().at(0) ?? tags.fetchedAt;
+      [tags.fetchedAt, rootFolders.fetchedAt, importLists.fetchedAt, qualityProfiles.fetchedAt]
+        .sort()
+        .at(0) ?? tags.fetchedAt;
 
     return {
       instanceId,
@@ -98,6 +109,7 @@ export class ResourcesService {
       tags: tags.payload,
       rootFolders: rootFolders.payload,
       importLists: importLists.payload,
+      qualityProfiles: qualityProfiles.payload,
     };
   }
 

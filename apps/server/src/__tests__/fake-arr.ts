@@ -57,6 +57,13 @@ export interface FakeImportList {
   secretServerField: string;
 }
 
+export interface FakeQualityProfile {
+  id: number;
+  name: string;
+  /** Extra field the client must preserve but never parses. */
+  cutoff: number;
+}
+
 export interface FakeCommand {
   id: number;
   name: string;
@@ -68,6 +75,7 @@ export interface FakeArrState {
   rootFolders: FakeRootFolder[];
   media: FakeMedia[];
   importLists: FakeImportList[];
+  qualityProfiles: FakeQualityProfile[];
   commands: FakeCommand[];
 }
 
@@ -121,6 +129,10 @@ function defaultState(): FakeArrState {
       makeMedia(13, 'Interstellar', '/data/media/Interstellar (2014)', []),
     ],
     commands: [],
+    qualityProfiles: [
+      { id: 1, name: 'HD-1080p', cutoff: 7 },
+      { id: 4, name: 'Ultra-HD', cutoff: 20 },
+    ],
     importLists: [
       {
         id: 1,
@@ -391,6 +403,12 @@ export async function startFakeArr(
       const command: FakeCommand = { id: state.commands.length + 1, name, body };
       state.commands.push(command);
       send(res, 201, { id: command.id, name, status: 'queued' });
+      return;
+    }
+
+    // -------------------------------------------------------- quality profiles
+    if (method === 'GET' && path === '/qualityprofile') {
+      send(res, 200, state.qualityProfiles);
       return;
     }
 

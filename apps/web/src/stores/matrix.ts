@@ -29,6 +29,7 @@ function placeholderSnapshot(instance: Instance, status: InstanceSnapshot['statu
     tags: [],
     rootFolders: [],
     importLists: [],
+    qualityProfiles: [],
   };
 }
 
@@ -113,6 +114,7 @@ export const useMatrixStore = defineStore('matrix', () => {
           tags: response.tags,
           rootFolders: response.rootFolders,
           importLists: response.importLists,
+          qualityProfiles: response.qualityProfiles,
         },
       };
     } catch (caught) {

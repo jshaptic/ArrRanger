@@ -1,4 +1,4 @@
-import type { ArrImportList, ArrRootFolder, ArrTagDetail, Instance } from '@arrranger/shared';
+import type { ArrImportList, ArrQualityProfile, ArrRootFolder, ArrTagDetail, Instance } from '@arrranger/shared';
 
 /**
  * Fleet normalisation.
@@ -19,6 +19,7 @@ export interface InstanceSnapshot {
   readonly tags: readonly ArrTagDetail[];
   readonly rootFolders: readonly ArrRootFolder[];
   readonly importLists: readonly ArrImportList[];
+  readonly qualityProfiles: readonly ArrQualityProfile[];
 }
 
 /** `full` = on every healthy instance, `unique` = on exactly one, `partial` = drift. */

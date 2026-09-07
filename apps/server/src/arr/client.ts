@@ -2,6 +2,7 @@ import {
   arrCommandSchema,
   arrImportListSchema,
   arrMediaSchema,
+  arrQualityProfileSchema,
   arrRootFolderSchema,
   arrSystemStatusSchema,
   arrTagDetailSchema,
@@ -13,6 +14,7 @@ import {
   type ArrImportList,
   type ArrJson,
   type ArrMedia,
+  type ArrQualityProfile,
   type ArrResource,
   type ArrRootFolder,
   type ArrSystemStatus,
@@ -264,6 +266,12 @@ export class ArrClient {
 
     // Radarr returns the updated resources; Sonarr may return an empty body.
     return Array.isArray(response) ? response.length : params.mediaIds.length;
+  }
+
+  // ----------------------------------------------------------- quality profiles
+
+  async listQualityProfiles(): Promise<ArrResource<ArrQualityProfile>[]> {
+    return toResources(arrQualityProfileSchema, await this.request<unknown>({ path: '/qualityprofile' }));
   }
 
   // --------------------------------------------------------------- import lists

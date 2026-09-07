@@ -110,12 +110,14 @@ describe('instances, resources and the staging queue over HTTP', () => {
 
   // ------------------------------------------------------------------ resources
 
-  test('serves tags, root folders and import lists, then caches them', async () => {
+  test('serves tags, root folders, import lists and quality profiles, then caches them', async () => {
     const first = await api<ResourceSnapshotResponse>(server.url, `/instances/${instanceId}/resources`);
     assert.equal(first.status, 200);
     assert.equal(first.body.tags.length, 3);
     assert.equal(first.body.rootFolders.length, 2);
     assert.equal(first.body.importLists.length, 1);
+    assert.equal(first.body.qualityProfiles.length, 2);
+    assert.equal(first.body.qualityProfiles.find((profile) => profile.id === 1)?.name, 'HD-1080p');
     assert.deepEqual(
       first.body.tags.find((tag) => tag.label === 'hd')?.movieIds,
       [10, 11],

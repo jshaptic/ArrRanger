@@ -106,6 +106,7 @@ vi.mock('@/api/resources', () => ({
             ? [{ id: 1, path: '/data/media/movies', accessible: true, freeSpace: 1, totalSpace: 2 }]
             : [],
         importLists: SNAPSHOTS[instanceId] ?? [],
+        qualityProfiles: [{ id: 1, name: 'HD-1080p' }],
       });
     },
     media: vi.fn(),
@@ -209,7 +210,8 @@ describe('ImportListFleetView', () => {
     expect(card?.textContent).toContain('Radarr-4K');
     expect(card?.textContent).toContain('/data/media/movies-4k');
     expect(card?.textContent).toContain('automatic add on');
-    expect(card?.textContent).toContain('id 1');
+    expect(card?.textContent).toContain('HD-1080p');
+    expect(card?.textContent).not.toContain('id 1');
     expect(card?.textContent).not.toContain('disagrees');
   });
 

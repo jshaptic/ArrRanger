@@ -62,7 +62,7 @@ function importList(id: number, name: string, overrides: Partial<ArrImportList> 
 function snapshot(
   id: number,
   name: string,
-  parts: Partial<Pick<InstanceSnapshot, 'status' | 'tags' | 'rootFolders' | 'importLists'>> = {},
+  parts: Partial<Pick<InstanceSnapshot, 'status' | 'tags' | 'rootFolders' | 'importLists' | 'qualityProfiles'>> = {},
 ): InstanceSnapshot {
   return {
     instance: instance(id, name),
@@ -72,6 +72,7 @@ function snapshot(
     tags: parts.tags ?? [],
     rootFolders: parts.rootFolders ?? [],
     importLists: parts.importLists ?? [],
+    qualityProfiles: parts.qualityProfiles ?? [],
   };
 }
 

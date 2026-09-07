@@ -15,6 +15,8 @@ export interface ImportListOwner {
   readonly autoAdd: boolean;
   readonly rootFolderPath: string;
   readonly qualityProfileId: number;
+  /** Null when this instance has no profile for the id - never invent a label. */
+  readonly qualityProfileName: string | null;
 }
 
 export interface ImportListFact {
@@ -43,11 +45,14 @@ export function importListOwners(
   row: ImportListRow,
   snapshots: readonly InstanceSnapshot[],
 ): ImportListOwner[] {
-  const byId = new Map(snapshots.map((snapshot) => [snapshot.instance.id, snapshot.instance]));
+  const byId = new Map(snapshots.map((snapshot) => [snapshot.instance.id, snapshot]));
 
   return row.cells.flatMap((cell) => {
     if (!cell.known || !cell.present || cell.listId === null) return [];
-    const instance = byId.get(cell.instanceId);
+    const snapshot = byId.get(cell.instanceId);
+    const instance = snapshot?.instance;
+    const qualityProfileName =
+      snapshot?.qualityProfiles.find((profile) => profile.id === cell.qualityProfileId)?.name ?? null;
     return [
       {
         instanceId: cell.instanceId,
@@ -58,6 +63,7 @@ export function importListOwners(
         autoAdd: cell.autoAdd,
         rootFolderPath: cell.rootFolderPath,
         qualityProfileId: cell.qualityProfileId,
+        qualityProfileName,
       },
     ];
   });
@@ -126,9 +132,11 @@ export function importListOwnerFacts(owner: ImportListOwner): ImportListFact[] {
     },
     {
       label: 'Profile',
-      value: `id ${String(owner.qualityProfileId)}`,
+      value:
+        owner.qualityProfileName ??
+        (owner.qualityProfileId === 0 ? 'none set' : `id ${String(owner.qualityProfileId)}`),
       detail: [],
-      tone: 'normal',
+      tone: owner.qualityProfileName !== null ? 'normal' : 'muted',
     },
   ];
 }

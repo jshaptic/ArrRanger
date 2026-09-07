@@ -226,11 +226,6 @@ onMounted(() => {
       </div>
     </div>
 
-    <p class="text-[11px] leading-relaxed text-muted">
-      Quality profile ids are shown raw: profile names live behind an endpoint ArrRanger does not
-      read yet, so they are copied as-is and never guessed.
-    </p>
-
     <AddImportListDialog v-if="cloning" :row="cloning" @close="cloning = null" />
   </div>
 </template>

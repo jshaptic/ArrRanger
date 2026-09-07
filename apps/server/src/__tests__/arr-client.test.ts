@@ -132,6 +132,15 @@ describe('ArrClient', () => {
     assert.equal(radarr.state.importLists.some((list) => list.name === 'Copied watchlist'), true);
   });
 
+  test('lists quality profiles by name while keeping the raw body', async () => {
+    const profiles = await clientFor(radarr).listQualityProfiles();
+    const hd = profiles.find((entry) => entry.view.id === 1);
+    assert.ok(hd);
+    assert.equal(hd.view.name, 'HD-1080p');
+    assert.equal('cutoff' in hd.view, false);
+    assert.equal(hd.raw['cutoff'], 7);
+  });
+
   test('maps a 400 validation body to a readable message', async () => {
     await assert.rejects(
       () => clientFor(radarr).createTag(''),

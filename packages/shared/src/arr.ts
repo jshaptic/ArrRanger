@@ -48,6 +48,13 @@ export const arrRootFolderSchema = z.object({
 });
 export type ArrRootFolder = z.infer<typeof arrRootFolderSchema>;
 
+/** GET /api/v3/qualityprofile - ids are per-instance; only the name is rendered. */
+export const arrQualityProfileSchema = z.object({
+  id: z.number().int(),
+  name: z.string(),
+});
+export type ArrQualityProfile = z.infer<typeof arrQualityProfileSchema>;
+
 export const arrFieldSchema = z.object({
   name: z.string(),
   value: z.unknown().optional(),

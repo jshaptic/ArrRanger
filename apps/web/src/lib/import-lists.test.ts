@@ -44,7 +44,9 @@ function importList(id: number, name: string, overrides: Partial<ArrImportList> 
 function snapshot(
   id: number,
   name: string,
-  parts: Partial<Pick<InstanceSnapshot, 'status' | 'importLists'>> & { kind?: Instance['kind'] } = {},
+  parts: Partial<Pick<InstanceSnapshot, 'status' | 'importLists' | 'qualityProfiles'>> & {
+    kind?: Instance['kind'];
+  } = {},
 ): InstanceSnapshot {
   return {
     instance: instance(id, name, parts.kind),
@@ -54,6 +56,7 @@ function snapshot(
     tags: [],
     rootFolders: [],
     importLists: parts.importLists ?? [],
+    qualityProfiles: parts.qualityProfiles ?? [],
   };
 }
 
@@ -128,6 +131,7 @@ describe('chip and card copy', () => {
             qualityProfileId: 4,
           }),
         ],
+        qualityProfiles: [{ id: 4, name: 'Ultra-HD' }],
       }),
     ];
     const row = buildImportListRows(fleet)[0];
@@ -135,10 +139,33 @@ describe('chip and card copy', () => {
     const [on] = importListOwners(row, fleet);
 
     expect(ownerStateLabel(on!)).toEqual({ value: 'on', title: 'Enabled, automatic add on' });
+    expect(on?.qualityProfileName).toBe('Ultra-HD');
 
     const facts = importListOwnerFacts(on!);
     expect(facts.map((fact) => fact.label)).toEqual(['State', 'Root folder', 'Profile']);
     expect(facts[1]).toMatchObject({ value: '/data/media/movies-4k', tone: 'normal', detail: [] });
-    expect(facts[2]).toMatchObject({ value: 'id 4', tone: 'normal', detail: [] });
+    expect(facts[2]).toMatchObject({ value: 'Ultra-HD', tone: 'normal', detail: [] });
+  });
+
+  it('keeps a raw id when the instance has no matching profile, and none set when the id is 0', () => {
+    const fleet = [
+      snapshot(1, 'Radarr-4K', {
+        importLists: [
+          importList(1, 'A', { qualityProfileId: 9 }),
+          importList(2, 'B', { qualityProfileId: 0 }),
+        ],
+        qualityProfiles: [{ id: 1, name: 'HD-1080p' }],
+      }),
+    ];
+    const rows = buildImportListRows(fleet);
+    const unknownRow = rows.find((row) => row.name === 'A');
+    const unsetRow = rows.find((row) => row.name === 'B');
+    if (unknownRow === undefined || unsetRow === undefined) throw new Error('expected both rows');
+
+    const unknown = importListOwners(unknownRow, fleet)[0];
+    const unset = importListOwners(unsetRow, fleet)[0];
+
+    expect(importListOwnerFacts(unknown!)[2]).toMatchObject({ value: 'id 9', tone: 'muted' });
+    expect(importListOwnerFacts(unset!)[2]).toMatchObject({ value: 'none set', tone: 'muted' });
   });
 });

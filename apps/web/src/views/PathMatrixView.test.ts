@@ -359,6 +359,7 @@ vi.mock('@/api/resources', () => ({
           totalSpace: 4_000_000_000,
         })),
         importLists: [],
+        qualityProfiles: [],
       }),
     media: vi.fn(),
     allMediaIdsInRootFolder: (instanceId: number) =>
