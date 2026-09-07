@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import BaseButton from '@/components/base/BaseButton.vue';
+import BaseInstanceBadge from '@/components/base/BaseInstanceBadge.vue';
 import BaseSelect, { type SelectOption } from '@/components/base/BaseSelect.vue';
 import ImpactSummary from '@/components/staging/ImpactSummary.vue';
 import StagedOperationRow from '@/components/staging/StagedOperationRow.vue';
-import { initialsOf } from '@/lib/format';
 import { useQueueStore } from '@/stores/queue';
 import { useUiStore } from '@/stores/ui';
 import IconCaretDown from '@/components/base/icons/IconCaretDown.vue';
@@ -141,9 +141,7 @@ function applyAll(): void {
       <div v-else class="space-y-4">
         <div v-for="group in queue.groupedByInstance" :key="group.instanceId">
           <h3 class="mb-1.5 flex items-center gap-2 text-[11px] font-semibold text-muted">
-            <span class="font-mono text-[10px] text-faint">
-              {{ group.instance === null ? 'FS' : initialsOf(group.label) }}
-            </span>
+            <BaseInstanceBadge :name="group.instance === null ? null : group.label" tone="muted" />
             {{ group.label }}
             <span class="text-faint">· {{ group.items.length }} operation(s)</span>
           </h3>

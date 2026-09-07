@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { initialsOf } from '@/lib/format';
 import type { InstanceSnapshot } from '@/lib/matrix';
 import { useMatrixStore } from '@/stores/matrix';
+import BaseInstanceBadge from '@/components/base/BaseInstanceBadge.vue';
 import IconCheck from '@/components/base/icons/IconCheck.vue';
 
 defineProps<{ column: InstanceSnapshot }>();
@@ -21,18 +21,12 @@ const matrix = useMatrixStore();
       :title="`Toggle ${column.instance.name} as a batch target`"
       @click="matrix.toggleInstance(column.instance.id)"
     >
-      <span
-        class="flex h-6 w-6 items-center justify-center rounded font-mono text-[10px] font-bold"
-        :class="
-          column.status === 'error'
-            ? 'bg-danger/20 text-danger'
-            : column.instance.kind === 'radarr'
-              ? 'bg-amber-500/20 text-amber-300'
-              : 'bg-sky-500/20 text-sky-300'
-        "
-      >
-        {{ initialsOf(column.instance.name) }}
-      </span>
+      <BaseInstanceBadge
+        :name="column.instance.name"
+        :kind="column.instance.kind"
+        :tone="column.status === 'error' ? 'error' : 'kind'"
+        size="lg"
+      />
       <span class="max-w-[7rem] truncate text-[11px] font-medium text-ink">
         {{ column.instance.name }}
       </span>

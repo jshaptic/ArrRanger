@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import BaseButton from '@/components/base/BaseButton.vue';
+import BaseInstanceBadge from '@/components/base/BaseInstanceBadge.vue';
 import BaseModal from '@/components/base/BaseModal.vue';
-import { initialsOf } from '@/lib/format';
 import { presentOp, STATUS_CLASSES, STATUS_LABELS } from '@/lib/staging';
 import { useInstancesStore } from '@/stores/instances';
 import { useQueueStore } from '@/stores/queue';
@@ -131,9 +131,7 @@ function instanceName(instanceId: number | null): string {
               </td>
               <td class="px-2 py-1.5 whitespace-nowrap">
                 <span class="inline-flex items-center gap-1 text-[11px] text-muted">
-                  <span class="font-mono text-[10px] text-faint">
-                    {{ initialsOf(instanceName(step.instanceId)) }}
-                  </span>
+                  <BaseInstanceBadge :name="instanceName(step.instanceId)" tone="muted" />
                   {{ instanceName(step.instanceId) }}
                 </span>
               </td>

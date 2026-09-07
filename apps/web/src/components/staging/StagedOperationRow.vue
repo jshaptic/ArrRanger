@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 import type { QueueItem } from '@arrranger/shared';
 import BaseButton from '@/components/base/BaseButton.vue';
-import { initialsOf } from '@/lib/format';
+import BaseInstanceBadge from '@/components/base/BaseInstanceBadge.vue';
 import { isDestructive, presentOp, STATUS_CLASSES, STATUS_LABELS, TONE_CLASSES } from '@/lib/staging';
 import { useInstancesStore } from '@/stores/instances';
 import IconClose from '@/components/base/icons/IconClose.vue';
@@ -75,7 +75,7 @@ const destructive = computed(() => isDestructive(props.item));
           class="inline-flex items-center gap-1 rounded border border-line px-1.5 py-0.5 text-[10px] text-muted"
           :title="instance?.baseUrl ?? ''"
         >
-          <span class="font-mono">{{ initialsOf(instance?.name ?? '??') }}</span>
+          <BaseInstanceBadge :name="instance?.name ?? '??'" tone="muted" />
           {{ instance?.name ?? `instance ${item.instanceId}` }}
         </span>
         <span

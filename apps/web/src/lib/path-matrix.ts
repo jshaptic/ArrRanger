@@ -470,12 +470,6 @@ export function ownerFacts(owner: PathOwner, path: string): OwnerFact[] {
   return facts;
 }
 
-/** The square initials badge, coloured by app. Shared by the chip and the card header. */
-export const KIND_CLASSES: Record<PathOwner['kind'], string> = {
-  radarr: 'bg-amber-500/20 text-amber-300',
-  sonarr: 'bg-sky-500/20 text-sky-300',
-};
-
 /** Chip tone per claim. A root folder its own instance cannot see is the loud one. */
 export const USE_CLASSES: Record<PathUse, string> = {
   rootFolder: 'border-sync/40 bg-sync/8 text-ink hover:border-sync/70',

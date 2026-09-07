@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import BaseButton from '@/components/base/BaseButton.vue';
-import { initialsOf } from '@/lib/format';
+import BaseInstanceBadge from '@/components/base/BaseInstanceBadge.vue';
 import {
   importListOwnerFacts,
   type ImportListOwner,
 } from '@/lib/import-lists';
 import type { ImportListRow } from '@/lib/matrix';
-import { KIND_CLASSES } from '@/lib/path-matrix';
 import { TONE_CLASSES, type OpPresentation } from '@/lib/staging';
 
 /**
@@ -89,12 +88,7 @@ onBeforeUnmount(() => {
     }"
   >
     <header class="flex items-center gap-2">
-      <span
-        class="flex h-5 w-5 shrink-0 items-center justify-center rounded font-mono text-[10px] font-bold"
-        :class="KIND_CLASSES[owner.kind]"
-      >
-        {{ initialsOf(owner.name) }}
-      </span>
+      <BaseInstanceBadge :name="owner.name" :kind="owner.kind" />
       <span class="min-w-0 flex-1 truncate font-semibold text-ink">{{ owner.name }}</span>
       <span class="text-[10px] tracking-wide text-faint uppercase">{{ owner.kind }}</span>
     </header>

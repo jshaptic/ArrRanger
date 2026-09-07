@@ -2,12 +2,11 @@
 import { computed, onBeforeUnmount, ref } from 'vue';
 import type { Instance, QueueItem } from '@arrranger/shared';
 import ImportListInstanceCard from './ImportListInstanceCard.vue';
+import BaseInstanceBadge from '@/components/base/BaseInstanceBadge.vue';
 import IconCreate from '@/components/base/icons/IconCreate.vue';
 import IconUnknown from '@/components/base/icons/IconUnknown.vue';
-import { initialsOf } from '@/lib/format';
 import { LIST_CHIP_CLASSES, ownerStateLabel, type ImportListOwner } from '@/lib/import-lists';
 import type { ImportListRow } from '@/lib/matrix';
-import { KIND_CLASSES } from '@/lib/path-matrix';
 import { stagedIntent, TONE_CLASSES } from '@/lib/staging';
 
 /**
@@ -149,12 +148,7 @@ onBeforeUnmount(clearTimers);
         @focus="show(owner, $event)"
         @blur="scheduleClose"
       >
-        <span
-          class="flex h-4 w-4 items-center justify-center rounded font-mono text-[9px] font-bold"
-          :class="KIND_CLASSES[owner.kind]"
-        >
-          {{ initialsOf(owner.name) }}
-        </span>
+        <BaseInstanceBadge :name="owner.name" :kind="owner.kind" size="sm" />
         <span>{{ owner.name }}</span>
         <span
           class="font-mono text-[10px] text-faint"
@@ -173,12 +167,7 @@ onBeforeUnmount(clearTimers);
         :class="TONE_CLASSES.create"
         :title="`${ghost.name}: copy staged for ${row.name}`"
       >
-        <span
-          class="flex h-4 w-4 items-center justify-center rounded font-mono text-[9px] font-bold"
-          :class="KIND_CLASSES[ghost.kind]"
-        >
-          {{ initialsOf(ghost.name) }}
-        </span>
+        <BaseInstanceBadge :name="ghost.name" :kind="ghost.kind" size="sm" />
         <span>{{ ghost.name }}</span>
         <span class="font-mono text-[10px] text-faint">· new</span>
       </span>

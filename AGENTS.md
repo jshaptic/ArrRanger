@@ -13,6 +13,9 @@ Keep this file under 200 lines. Tighten existing rules rather than adding sectio
 - **ALWAYS `PUT` a merged resource** - fetch raw, merge changed keys, PUT (`mergeForPut`).
   A partial body silently wipes omitted fields.
 - **ALWAYS reuse `components/base`.** Invent a new component only when nothing there fits.
+- **NEVER draw an instance's initials or its app colour by hand.** `BaseInstanceBadge`
+  is the only one; `BaseInstanceBadge.test.ts` fails the build if `initialsOf` or the
+  radarr/sonarr palette is named anywhere else.
 - **NEVER import an icon library outside `components/base/icons/glyphs.ts`.** That module
   is the app's only contact with `@remixicon/vue`; every other file asks for a meaning
   (`IconWarning`) and optionally a weight (`variant="solid"`), never a drawing.

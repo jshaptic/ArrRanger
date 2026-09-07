@@ -4,7 +4,8 @@ import type { Instance } from '@arrranger/shared';
 import BaseButton from '@/components/base/BaseButton.vue';
 import EmptyState from '@/components/base/EmptyState.vue';
 import InstanceFormModal from '@/components/instances/InstanceFormModal.vue';
-import { formatRelativeTime, initialsOf } from '@/lib/format';
+import { formatRelativeTime } from '@/lib/format';
+import BaseInstanceBadge from '@/components/base/BaseInstanceBadge.vue';
 import { useInstancesStore } from '@/stores/instances';
 import { useMatrixStore } from '@/stores/matrix';
 import { useUiStore } from '@/stores/ui';
@@ -110,16 +111,7 @@ onMounted(() => {
           >
             <td class="px-3 py-2">
               <div class="flex items-center gap-2">
-                <span
-                  class="flex h-6 w-6 items-center justify-center rounded font-mono text-[10px] font-bold"
-                  :class="
-                    instance.kind === 'radarr'
-                      ? 'bg-amber-500/20 text-amber-300'
-                      : 'bg-sky-500/20 text-sky-300'
-                  "
-                >
-                  {{ initialsOf(instance.name) }}
-                </span>
+                <BaseInstanceBadge :name="instance.name" :kind="instance.kind" size="lg" />
                 <span>
                   <span class="block text-ink">{{ instance.name }}</span>
                   <span class="block text-[10px] text-faint uppercase">{{ instance.kind }}</span>

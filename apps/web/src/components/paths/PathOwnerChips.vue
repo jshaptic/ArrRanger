@@ -2,9 +2,9 @@
 import { computed, onBeforeUnmount, ref } from 'vue';
 import type { PathOwner, QueueItem } from '@arrranger/shared';
 import PathOwnerCard from './PathOwnerCard.vue';
-import { initialsOf } from '@/lib/format';
-import { KIND_CLASSES, ownerHeadline, ownerMedia, USE_CLASSES } from '@/lib/path-matrix';
+import { ownerHeadline, ownerMedia, USE_CLASSES } from '@/lib/path-matrix';
 import { stagedIntent, TONE_CLASSES } from '@/lib/staging';
+import BaseInstanceBadge from '@/components/base/BaseInstanceBadge.vue';
 import IconCreate from '@/components/base/icons/IconCreate.vue';
 import IconUnknown from '@/components/base/icons/IconUnknown.vue';
 import IconWarning from '@/components/base/icons/IconWarning.vue';
@@ -161,12 +161,7 @@ onBeforeUnmount(clearTimers);
         @focus="show(owner, $event)"
         @blur="scheduleClose"
       >
-        <span
-          class="flex h-4 w-4 items-center justify-center rounded font-mono text-[9px] font-bold"
-          :class="KIND_CLASSES[owner.kind]"
-        >
-          {{ initialsOf(owner.name) }}
-        </span>
+        <BaseInstanceBadge :name="owner.name" :kind="owner.kind" size="sm" />
         <span>{{ owner.name }}</span>
 
         <!-- The one count that belongs here: this instance's share of the folder. The

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import BaseButton from '@/components/base/BaseButton.vue';
-import { formatRelativeTime, initialsOf } from '@/lib/format';
+import { formatRelativeTime } from '@/lib/format';
+import BaseInstanceBadge from '@/components/base/BaseInstanceBadge.vue';
 import { useMatrixStore } from '@/stores/matrix';
 import IconUnknown from '@/components/base/icons/IconUnknown.vue';
 
@@ -74,16 +75,7 @@ function chipClasses(instanceId: number, status: 'ok' | 'error' | 'loading'): st
         "
         @click="matrix.toggleInstance(column.instance.id)"
       >
-        <span
-          class="flex h-5 w-5 items-center justify-center rounded font-mono text-[10px] font-bold"
-          :class="
-            column.instance.kind === 'radarr'
-              ? 'bg-amber-500/20 text-amber-300'
-              : 'bg-sky-500/20 text-sky-300'
-          "
-        >
-          {{ initialsOf(column.instance.name) }}
-        </span>
+        <BaseInstanceBadge :name="column.instance.name" :kind="column.instance.kind" />
         <span class="flex flex-col leading-tight">
           <span class="text-xs font-medium">{{ column.instance.name }}</span>
           <span class="text-[10px] opacity-70">

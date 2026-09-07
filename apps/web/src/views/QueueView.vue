@@ -3,10 +3,11 @@ import { computed, onMounted, ref } from 'vue';
 import type { QueueItemDetailResponse, QueueRun } from '@arrranger/shared';
 import { queueApi } from '@/api/queue';
 import BaseButton from '@/components/base/BaseButton.vue';
+import BaseInstanceBadge from '@/components/base/BaseInstanceBadge.vue';
 import EmptyState from '@/components/base/EmptyState.vue';
 import ImpactSummary from '@/components/staging/ImpactSummary.vue';
 import StagedOperationRow from '@/components/staging/StagedOperationRow.vue';
-import { formatRelativeTime, initialsOf } from '@/lib/format';
+import { formatRelativeTime } from '@/lib/format';
 import { useQueueStore } from '@/stores/queue';
 import { useUiStore } from '@/stores/ui';
 import IconQueue from '@/components/base/icons/IconQueue.vue';
@@ -118,9 +119,7 @@ onMounted(() => {
       <div v-else class="space-y-4">
         <div v-for="group in queue.groupedByInstance" :key="group.instanceId">
           <h3 class="mb-1.5 flex items-center gap-2 text-[11px] font-semibold text-muted">
-            <span class="font-mono text-[10px] text-faint">
-              {{ group.instance === null ? 'FS' : initialsOf(group.label) }}
-            </span>
+            <BaseInstanceBadge :name="group.instance === null ? null : group.label" tone="muted" />
             {{ group.label }}
             <span class="text-faint">· {{ group.items.length }} operation(s)</span>
           </h3>
