@@ -494,10 +494,22 @@ describe('MediaFleetView', () => {
     expect(tmdb?.attributes('target')).toBe('_blank');
     expect(tmdb?.attributes('rel')).toContain('noreferrer');
 
+    const mdblist = dune?.find('[data-link="mdblist"]');
+    expect(mdblist?.attributes('href')).toBe('https://mdblist.com/movie/tt1160419');
+
     // Shogun has no IMDb id, so there is no dead link pretending otherwise
     const shogun = rowFor(wrapper, 'Shogun');
     expect(shogun?.find('[data-link="imdb"]').exists()).toBe(false);
+    expect(shogun?.find('[data-link="mdblist"]').exists()).toBe(false);
     expect(shogun?.find('[data-link="tvdb"]').exists()).toBe(true);
+  });
+
+  it('keys the MDBList link on IMDb and the show path for a series', async () => {
+    ROWS = [{ ...SERIES, imdbId: 'tt2788316' }];
+    const wrapper = await mountView();
+    expect(rowFor(wrapper, 'Shogun')?.find('[data-link="mdblist"]').attributes('href')).toBe(
+      'https://mdblist.com/show/tt2788316',
+    );
   });
 
   it('states Sonarr list membership once, and never as "in no list"', async () => {

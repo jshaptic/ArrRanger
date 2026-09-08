@@ -45,6 +45,16 @@ export function externalLinks(row: MediaRow): ExternalLink[] {
       title: `Open ${row.title} on TVDb`,
     });
   }
+  // MDBList title pages are IMDb-keyed; a TMDb or TVDb number in that path 404s.
+  if (row.imdbId !== null) {
+    const mdblistKind = row.kind === 'movie' ? 'movie' : 'show';
+    links.push({
+      key: 'mdblist',
+      label: 'MDBList',
+      href: `https://mdblist.com/${mdblistKind}/${row.imdbId}`,
+      title: `Open ${row.title} on MDBList`,
+    });
+  }
 
   return links;
 }
