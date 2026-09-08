@@ -464,6 +464,58 @@ describe('MediaFleetView', () => {
     ).toBe('root:"/data/media/movies"');
   });
 
+  it('a tag filters by itself', async () => {
+    const wrapper = await mountView();
+    await rowFor(wrapper, 'Dune')?.find('[data-tag]').trigger('click');
+    await flushPromises();
+
+    expect(
+      (wrapper.find('[data-testid="media-filter-input"]').element as HTMLInputElement).value,
+    ).toBe('tags:"kids"');
+  });
+
+  it('an empty tags cell filters by tags:none', async () => {
+    const wrapper = await mountView();
+    await rowFor(wrapper, 'Shogun')?.find('[data-tag="none"]').trigger('click');
+    await flushPromises();
+
+    expect(
+      (wrapper.find('[data-testid="media-filter-input"]').element as HTMLInputElement).value,
+    ).toBe('tags:none');
+  });
+
+  it('a status word filters by itself', async () => {
+    const wrapper = await mountView();
+    await rowFor(wrapper, 'Dune')?.find('[data-status]').trigger('click');
+    await flushPromises();
+
+    expect(
+      (wrapper.find('[data-testid="media-filter-input"]').element as HTMLInputElement).value,
+    ).toBe('status:"released"');
+    // outside the checkbox label, so the click did not select the row
+    expect(wrapper.find('[data-testid="summary"]').exists()).toBe(false);
+  });
+
+  it('an unmonitored badge filters by monitored:false', async () => {
+    const wrapper = await mountView();
+    await rowFor(wrapper, 'Shogun')?.find('[data-flag="unmonitored"]').trigger('click');
+    await flushPromises();
+
+    expect(
+      (wrapper.find('[data-testid="media-filter-input"]').element as HTMLInputElement).value,
+    ).toBe('monitored:false');
+  });
+
+  it('a no-profile badge filters by profile:none', async () => {
+    const wrapper = await mountView();
+    await rowFor(wrapper, 'Arrival')?.find('[data-flag="no-quality-profile"]').trigger('click');
+    await flushPromises();
+
+    expect(
+      (wrapper.find('[data-testid="media-filter-input"]').element as HTMLInputElement).value,
+    ).toBe('profile:none');
+  });
+
   it('never speaks the matrix vocabulary, and shows no artwork', async () => {
     const wrapper = await mountView();
     // The rows are where a claim would be made. The notices above the table are allowed to

@@ -79,9 +79,27 @@ function sizeOf(row: MediaRow) {
   return rowSize(row);
 }
 
-/** Quoted, because a path is one value however many spaces it has. */
+/** Quoted, because a path, a tag or a status is one value however many spaces it has. */
+function filterEquals(field: string, value: string): void {
+  void media.setFilter(`${field}:"${value}"`);
+}
+
 function filterByRoot(path: string): void {
-  void media.setFilter(`root:"${path}"`);
+  filterEquals('root', path);
+}
+
+function filterByTag(tag: string): void {
+  filterEquals('tags', tag);
+}
+
+function filterByStatus(status: string): void {
+  filterEquals('status', status);
+}
+
+function filterByNone(field: string): void {
+  // Unquoted: `none` is the known-absence sentinel. Quoting it would look for a value
+  // actually called "none".
+  void media.setFilter(`${field}:none`);
 }
 
 /**
@@ -284,26 +302,36 @@ onMounted(() => {
                   class="sticky left-0 z-10 border-b border-line px-3 py-1.5 text-left font-normal"
                   :class="media.isRowSelected(row.key) ? 'bg-[#16202b]' : 'bg-surface'"
                 >
-                  <label class="flex items-center gap-2">
-                    <BaseCheckbox
-                      :model-value="media.isRowSelected(row.key)"
-                      @change="media.toggleRow(row.key)"
-                    />
-                    <component
-                      :is="stagedFor(row)?.icon"
-                      v-if="stagedFor(row)"
-                      size="sm"
-                      class="shrink-0 text-staged"
-                      data-testid="row-staged"
-                      :title="`${stagedFor(row)?.label} staged for ${row.title}`"
-                    />
-                    <span data-name class="truncate text-ink">
-                      {{ row.title }}<template v-if="row.year"> ({{ row.year }})</template>
-                    </span>
-                    <span v-if="row.status" class="shrink-0 text-[10px] text-faint">
+                  <div class="flex items-center gap-2">
+                    <label class="flex min-w-0 items-center gap-2">
+                      <BaseCheckbox
+                        :model-value="media.isRowSelected(row.key)"
+                        @change="media.toggleRow(row.key)"
+                      />
+                      <component
+                        :is="stagedFor(row)?.icon"
+                        v-if="stagedFor(row)"
+                        size="sm"
+                        class="shrink-0 text-staged"
+                        data-testid="row-staged"
+                        :title="`${stagedFor(row)?.label} staged for ${row.title}`"
+                      />
+                      <span data-name class="truncate text-ink">
+                        {{ row.title }}<template v-if="row.year"> ({{ row.year }})</template>
+                      </span>
+                    </label>
+                    <!-- Outside the checkbox label so a click filters rather than selecting. -->
+                    <button
+                      v-if="row.status"
+                      type="button"
+                      data-status
+                      class="shrink-0 text-[10px] text-faint transition-colors hover:text-accent"
+                      :title="`Filter by status:${row.status}`"
+                      @click="filterByStatus(row.status)"
+                    >
                       {{ row.status }}
-                    </span>
-                  </label>
+                    </button>
+                  </div>
                 </th>
 
                 <td class="border-b border-l border-line px-2 py-1.5 text-[10px] text-faint">
@@ -344,22 +372,35 @@ onMounted(() => {
                       :key="flag"
                       :flag="flag"
                       :row="row"
+                      @filter="media.setFilter($event)"
                     />
                   </span>
                 </td>
 
                 <td class="border-b border-l border-line px-2 py-1.5">
-                  <span v-if="row.tags.length === 0" class="text-faint">—</span>
+                  <!-- Clicking one filters by it, the same way a root folder does. -->
+                  <button
+                    v-if="row.tags.length === 0"
+                    type="button"
+                    data-tag="none"
+                    class="text-faint transition-colors hover:text-accent"
+                    title="Filter by tags:none"
+                    @click="filterByNone('tags')"
+                  >
+                    —
+                  </button>
                   <span v-else class="flex flex-wrap gap-1">
-                    <span
+                    <button
                       v-for="tag in row.tags"
                       :key="tag"
+                      type="button"
                       data-tag
-                      class="rounded border border-line px-1.5 py-0.5 text-[10px] text-muted"
-                      :title="`On ${row.facets.filter((facet) => facet.tags.includes(tag)).map((facet) => facet.name).join(', ')}`"
+                      class="rounded border border-line px-1.5 py-0.5 text-[10px] text-muted transition-colors hover:border-accent hover:text-accent"
+                      :title="`Filter by ${tag} (on ${row.facets.filter((facet) => facet.tags.includes(tag)).map((facet) => facet.name).join(', ')})`"
+                      @click="filterByTag(tag)"
                     >
                       {{ tag }}
-                    </span>
+                    </button>
                   </span>
                 </td>
 

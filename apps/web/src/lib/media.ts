@@ -134,6 +134,17 @@ export const MEDIA_FLAG_STYLES: Record<MediaFlag, MediaFlagStyle> = {
   },
 };
 
+/**
+ * The filter a Status-column click applies, matching the field you would type.
+ *
+ * `outside-root-folders` has no field of its own, so a click there does nothing - the
+ * badge still names the fact, it just is not a filter control.
+ */
+export const MEDIA_FLAG_FILTER: Partial<Record<MediaFlag, string>> = {
+  unmonitored: 'monitored:false',
+  'no-quality-profile': 'profile:none',
+};
+
 /** Only `warn` and above draw a glyph: `untracked`-style noise earns no icon. */
 export const MEDIA_SEVERITY_ICONS: Record<MediaSeverity, Component | null> = {
   ok: null,
