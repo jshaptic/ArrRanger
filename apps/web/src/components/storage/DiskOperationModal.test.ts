@@ -61,9 +61,12 @@ vi.mock('@/api/resources', () => ({
   resourcesApi: {
     snapshot: vi.fn(),
     media: vi.fn(),
-    allMediaIdsInRootFolder: vi.fn((instanceId: number) =>
-      Promise.resolve(instanceId === 1 ? [10, 11, 12] : []),
-    ),
+    allMediaIdsInRootFolder: vi.fn((instanceId: number, rootFolderPath: string) => {
+      if (instanceId !== 1) return Promise.resolve([]);
+      if (rootFolderPath.endsWith('auto-feed/0k')) return Promise.resolve([10, 11]);
+      if (rootFolderPath.endsWith('curated-feed/0k')) return Promise.resolve([12]);
+      return Promise.resolve([10, 11, 12]);
+    }),
     refresh: vi.fn(),
   },
 }));
@@ -93,8 +96,7 @@ const RADARR_4K = {
   instanceId: 1,
   name: 'Radarr-4K',
   kind: 'radarr' as const,
-  rootFolderId: 5,
-  mediaUnder: 3,
+  roots: [{ path: ROOT, rootFolderId: 5 }],
 };
 
 async function mountDialog(
@@ -254,7 +256,7 @@ describe('DiskOperationModal', () => {
     // still created at the new path and the old one dropped, or the rename would strand a
     // freshly configured instance.
     const wrapper = await mountDialog({
-      alignTargets: [{ ...RADARR_4K, instanceId: 2, name: 'Sonarr', kind: 'sonarr', mediaUnder: 0 }],
+      alignTargets: [{ ...RADARR_4K, instanceId: 2, name: 'Sonarr', kind: 'sonarr' }],
     });
 
     type('films');
@@ -271,6 +273,76 @@ describe('DiskOperationModal', () => {
       'rootFolder.delete',
     ]);
     expect(push.mock.calls[2]?.[0][0]).toMatchObject({ dependsOnId: 2 });
+    wrapper.unmount();
+  });
+
+  it('rewrites every nested root folder when the parent is renamed', async () => {
+    const from = '/data/media/movies/europe';
+    const wrapper = await mountDialog({
+      target: from,
+      alignTargets: [
+        {
+          instanceId: 1,
+          name: 'Radarr',
+          kind: 'radarr',
+          roots: [
+            { path: `${from}/auto-feed/0k`, rootFolderId: 8 },
+            { path: `${from}/curated-feed/0k`, rootFolderId: 9 },
+          ],
+        },
+      ],
+    });
+
+    type('european');
+    for (let tick = 0; tick < 4; tick += 1) await flushPromises();
+
+    expect(document.body.textContent).toContain('2 root folder(s)');
+    expect(document.body.textContent).toContain(`${from}/auto-feed/0k`);
+    expect(document.body.textContent).toContain(`${from}/curated-feed/0k`);
+
+    stageButton()?.click();
+    for (let tick = 0; tick < 10; tick += 1) await flushPromises();
+
+    const batches = push.mock.calls.map((call) => call[0]?.[0]).filter((entry) => entry !== undefined);
+    expect(batches[0]).toEqual({
+      op: 'fs.rename',
+      payload: { from, to: '/data/media/movies/european' },
+    });
+    expect(batches[1]).toMatchObject({
+      op: 'rootFolder.create',
+      payload: { path: '/data/media/movies/european/auto-feed/0k' },
+    });
+    expect(batches[2]).toMatchObject({
+      op: 'media.moveRootFolder',
+      payload: {
+        mediaIds: [10, 11],
+        toRootFolderPath: '/data/media/movies/european/auto-feed/0k',
+        moveFiles: false,
+      },
+    });
+    expect(
+      batches.some(
+        (entry) =>
+          entry.op === 'rootFolder.create' &&
+          entry.payload.path === '/data/media/movies/european/curated-feed/0k',
+      ),
+    ).toBe(true);
+    expect(
+      batches.some(
+        (entry) =>
+          entry.op === 'rootFolder.delete' &&
+          entry.payload.path === `${from}/auto-feed/0k` &&
+          entry.payload.rootFolderId === 8,
+      ),
+    ).toBe(true);
+    expect(
+      batches.some(
+        (entry) =>
+          entry.op === 'rootFolder.delete' &&
+          entry.payload.path === `${from}/curated-feed/0k` &&
+          entry.payload.rootFolderId === 9,
+      ),
+    ).toBe(true);
     wrapper.unmount();
   });
 });

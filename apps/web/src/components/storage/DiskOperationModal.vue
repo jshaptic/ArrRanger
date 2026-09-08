@@ -4,14 +4,17 @@ import type { FsOp, FsPreflight, NewFsQueueItem } from '@arrranger/shared';
 import BaseButton from '@/components/base/BaseButton.vue';
 import BaseModal from '@/components/base/BaseModal.vue';
 import { resourcesApi } from '@/api/resources';
-import { basename, joinPath, parentOf } from '@/lib/fs-tree';
+import { basename, joinPath, parentOf, rewritePathPrefix } from '@/lib/fs-tree';
 import { formatBytes } from '@/lib/format';
+import { type AlignTarget } from '@/lib/path-matrix';
 import { usePathsStore } from '@/stores/paths';
 import { useQueueStore } from '@/stores/queue';
 import IconCheck from '@/components/base/icons/IconCheck.vue';
 import IconError from '@/components/base/icons/IconError.vue';
 import IconWarning from '@/components/base/icons/IconWarning.vue';
 import BaseCheckbox from '@/components/base/BaseCheckbox.vue';
+
+export type { AlignTarget };
 
 /**
  * What this dialog still does to a folder that exists.
@@ -22,7 +25,8 @@ import BaseCheckbox from '@/components/base/BaseCheckbox.vue';
 export type DiskOperation = 'rename' | 'move' | 'delete';
 
 /**
- * An instance whose root folder *is* the folder being renamed, and can therefore follow it.
+ * An instance whose root folder is this folder, or lives under it, and can therefore follow
+ * a rename.
  *
  * This is what the separate "align" dialog used to be. Renaming a root folder on disk and
  * re-pointing the instances that root at it were two buttons asking the same first question
@@ -31,18 +35,12 @@ export type DiskOperation = 'rename' | 'move' | 'delete';
  * dialog, with the *Arr half as instance checkboxes: the disk step is always staged first
  * and everything else hangs off it.
  *
- * Only root folders appear here. An individual media folder deliberately gets no align
- * chain - `media.moveRootFolder` only sets `rootFolderPath` and `media.refresh` re-reads
- * the stored path, so nothing in the operation set can make *Arr adopt a renamed media
- * folder. Those instances are named in the dangling warning instead.
+ * A parent of root folders belongs here too. Renaming it on disk without rewriting the
+ * nested registrations is how *Arr ends up with unavailable paths. An individual *media*
+ * folder still gets no align chain - `media.moveRootFolder` only sets `rootFolderPath` and
+ * `media.refresh` re-reads the stored path, so nothing in the operation set can make *Arr
+ * adopt a renamed media folder. Those instances are named in the dangling warning instead.
  */
-export interface AlignTarget {
-  readonly instanceId: number;
-  readonly name: string;
-  readonly kind: 'radarr' | 'sonarr';
-  readonly rootFolderId: number | null;
-  readonly mediaUnder: number;
-}
 
 const props = withDefaults(
   defineProps<{
@@ -53,7 +51,7 @@ const props = withDefaults(
      * keeps working; when given, a relocation says out loud what it would leave behind.
      */
     trackedBy?: ReadonlyArray<{ instanceId: number; name: string; mediaCount: number }>;
-    /** Instances rooting at exactly `target` - the ones a rename can carry along. */
+    /** Instances rooting at or under `target` - the ones a rename can carry along. */
     alignTargets?: readonly AlignTarget[];
   }>(),
   { trackedBy: () => [], alignTargets: () => [] },
@@ -77,9 +75,13 @@ const checking = ref(false);
 /** Only a rename can be followed: a move crosses into a directory *Arr may not root at. */
 const alignable = computed(() => props.operation === 'rename' && props.alignTargets.length > 0);
 const selectedInstances = ref<number[]>([]);
-const mediaIds = ref<Record<number, number[] | 'loading' | 'error'>>({});
+const mediaIds = ref<Record<string, number[] | 'loading' | 'error'>>({});
 const removeOld = ref(true);
 const refreshAfter = ref(true);
+
+function mediaKey(instanceId: number, path: string): string {
+  return `${String(instanceId)}\n${path}`;
+}
 
 const TITLES: Record<DiskOperation, string> = {
   rename: 'Rename on disk',
@@ -127,10 +129,18 @@ const chosen = computed(() =>
   props.alignTargets.filter((entry) => selectedInstances.value.includes(entry.instanceId)),
 );
 
-/** The ids counted for an instance, or none while the count is still running or failed. */
-function idsFor(instanceId: number): readonly number[] {
-  const ids = mediaIds.value[instanceId];
+/** The ids counted for one root folder, or none while the count is still running or failed. */
+function idsFor(instanceId: number, path: string): readonly number[] {
+  const ids = mediaIds.value[mediaKey(instanceId, path)];
   return Array.isArray(ids) ? ids : [];
+}
+
+function idsForTarget(entry: AlignTarget): readonly number[] {
+  return entry.roots.flatMap((root) => [...idsFor(entry.instanceId, root.path)]);
+}
+
+function destinationPath(): string | null {
+  return item.value?.op === 'fs.rename' ? item.value.payload.to : null;
 }
 
 /**
@@ -138,7 +148,9 @@ function idsFor(instanceId: number): readonly number[] {
  * leave the rest pointing at a path that no longer exists.
  */
 const counting = computed(() =>
-  props.alignTargets.some((entry) => mediaIds.value[entry.instanceId] === 'loading'),
+  props.alignTargets.some((entry) =>
+    entry.roots.some((root) => mediaIds.value[mediaKey(entry.instanceId, root.path)] === 'loading'),
+  ),
 );
 
 /** What the footer promises, counted the way the queue will actually build it. */
@@ -146,26 +158,34 @@ const stepCount = computed(
   () =>
     1 +
     chosen.value.reduce((sum, entry) => {
-      const items = idsFor(entry.instanceId).length;
       return (
         sum +
-        1 +
-        (items > 0 ? 1 : 0) +
-        (items > 0 && refreshAfter.value ? 1 : 0) +
-        (removeOld.value && entry.rootFolderId !== null ? 1 : 0)
+        entry.roots.reduce((rootSum, root) => {
+          const items = idsFor(entry.instanceId, root.path).length;
+          return (
+            rootSum +
+            1 +
+            (items > 0 ? 1 : 0) +
+            (items > 0 && refreshAfter.value ? 1 : 0) +
+            (removeOld.value && root.rootFolderId !== null ? 1 : 0)
+          );
+        }, 0)
       );
     }, 0),
 );
 
 async function loadMediaIds(): Promise<void> {
   for (const entry of props.alignTargets) {
-    if (mediaIds.value[entry.instanceId] !== undefined) continue;
-    mediaIds.value = { ...mediaIds.value, [entry.instanceId]: 'loading' };
-    try {
-      const ids = await resourcesApi.allMediaIdsInRootFolder(entry.instanceId, props.target);
-      mediaIds.value = { ...mediaIds.value, [entry.instanceId]: ids };
-    } catch {
-      mediaIds.value = { ...mediaIds.value, [entry.instanceId]: 'error' };
+    for (const root of entry.roots) {
+      const key = mediaKey(entry.instanceId, root.path);
+      if (mediaIds.value[key] !== undefined) continue;
+      mediaIds.value = { ...mediaIds.value, [key]: 'loading' };
+      try {
+        const ids = await resourcesApi.allMediaIdsInRootFolder(entry.instanceId, root.path);
+        mediaIds.value = { ...mediaIds.value, [key]: ids };
+      } catch {
+        mediaIds.value = { ...mediaIds.value, [key]: 'error' };
+      }
     }
   }
 }
@@ -227,11 +247,15 @@ async function stage(): Promise<void> {
       to: candidate.payload.to,
       removeOldRootFolder: removeOld.value,
       refreshAfter: refreshAfter.value,
-      targets: chosen.value.map((entry) => ({
-        instanceId: entry.instanceId,
-        mediaIds: idsFor(entry.instanceId),
-        oldRootFolderId: entry.rootFolderId,
-      })),
+      targets: chosen.value.flatMap((entry) =>
+        entry.roots.map((root) => ({
+          instanceId: entry.instanceId,
+          fromPath: root.path,
+          toPath: rewritePathPrefix(root.path, candidate.payload.from, candidate.payload.to),
+          mediaIds: idsFor(entry.instanceId, root.path),
+          oldRootFolderId: root.rootFolderId,
+        })),
+      ),
     });
   } else {
     await queue.stageFsOperation(candidate, describeStaging());
@@ -280,7 +304,11 @@ watch([name, destination, recursive, force], () => void check());
         instead, so this only speaks when nothing is following the folder.
       -->
       <section
-        v-if="trackedBy.length > 0 && props.operation !== 'delete' && chosen.length === 0"
+        v-if="
+          props.operation !== 'delete' &&
+          chosen.length === 0 &&
+          (trackedBy.length > 0 || alignable)
+        "
         class="rounded-md border border-drift/40 bg-drift/5 px-3 py-2 text-[11px] leading-relaxed text-drift"
       >
         <p v-for="owner in trackedBy" :key="owner.instanceId">
@@ -368,7 +396,9 @@ watch([name, destination, recursive, force], () => void check());
 
       <!-- follow it in *Arr: the old align dialog, now the second half of the rename -->
       <div v-if="alignable" class="space-y-2" data-testid="align-targets">
-        <p class="text-xs text-muted">Instances using this path as a root folder</p>
+        <p class="text-xs text-muted">
+          Instances with a root folder at or under this path
+        </p>
         <ul class="space-y-1">
           <li v-for="entry in props.alignTargets" :key="entry.instanceId">
             <label class="flex items-center justify-between gap-3 rounded border border-line bg-raised/60 px-2.5 py-1.5 text-xs">
@@ -381,13 +411,26 @@ watch([name, destination, recursive, force], () => void check());
                 <span class="text-[10px] text-faint uppercase">{{ entry.kind }}</span>
               </span>
               <span class="text-[11px] text-muted">
-                <template v-if="mediaIds[entry.instanceId] === 'loading'">counting…</template>
-                <template v-else-if="mediaIds[entry.instanceId] === 'error'">
+                <template v-if="entry.roots.some((root) => mediaIds[mediaKey(entry.instanceId, root.path)] === 'loading')">
+                  counting…
+                </template>
+                <template v-else-if="entry.roots.some((root) => mediaIds[mediaKey(entry.instanceId, root.path)] === 'error')">
                   <span class="text-danger">count failed</span>
                 </template>
-                <template v-else>{{ idsFor(entry.instanceId).length }} item(s) to realign</template>
+                <template v-else>
+                  {{ idsForTarget(entry).length }} item(s) to realign
+                  <span v-if="entry.roots.length > 1 || entry.roots[0]?.path !== props.target">
+                    · {{ entry.roots.length }} root folder(s)
+                  </span>
+                </template>
               </span>
             </label>
+            <ul
+              v-if="entry.roots.length > 1 || entry.roots[0]?.path !== props.target"
+              class="mt-1 space-y-0.5 pl-8 text-[11px] font-mono text-faint"
+            >
+              <li v-for="root in entry.roots" :key="root.path">{{ root.path }}</li>
+            </ul>
           </li>
         </ul>
 
@@ -424,11 +467,20 @@ watch([name, destination, recursive, force], () => void check());
             </li>
             <li v-for="(entry, index) in chosen" :key="entry.instanceId">
               <span class="font-mono text-ink">{{ index + 2 }}.</span>
-              on {{ entry.name }}: add the new root folder<template
-                v-if="idsFor(entry.instanceId).length > 0"
-              >, point its media at it with
-                <span class="font-mono text-sync">moveFiles: false</span><span v-if="refreshAfter">, rescan</span></template>
-              <span v-if="removeOld && entry.rootFolderId !== null">, then drop the old root folder</span>
+              on {{ entry.name }}:
+              <template v-for="(root, rootIndex) in entry.roots" :key="root.path">
+                <span v-if="rootIndex > 0">; </span>
+                add
+                <span class="font-mono">{{
+                  destinationPath() === null
+                    ? root.path
+                    : rewritePathPrefix(root.path, props.target, destinationPath() ?? props.target)
+                }}</span>
+                <template v-if="idsFor(entry.instanceId, root.path).length > 0"
+                  >, point its media at it with
+                  <span class="font-mono text-sync">moveFiles: false</span><span v-if="refreshAfter">, rescan</span></template>
+                <span v-if="removeOld && root.rootFolderId !== null">, then drop the old root folder</span>
+              </template>
             </li>
           </ol>
           <p class="mt-2 text-[11px] leading-relaxed text-muted">

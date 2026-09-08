@@ -306,7 +306,8 @@ describe('PathIndexService', () => {
       assert.deepEqual(await ids('/data/media/movies'), [1]);
       assert.deepEqual(await ids('/data/media/movies/Dune (2021)'), [1]);
       assert.deepEqual(await ids('/data/media/tv'), [2]);
-      assert.deepEqual(await ids('/data/media'), [1]);
+      // Instance 2 roots under here with nothing downloaded yet - still a reference.
+      assert.deepEqual(await ids('/data/media'), [1, 2]);
     });
 
     test('a shared prefix is not a reference', async () => {

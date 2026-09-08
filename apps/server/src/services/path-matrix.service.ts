@@ -517,7 +517,8 @@ export class PathMatrixService {
       // and only for the rows actually returned, never for the whole candidate set.
       const rootFoldersUnder = index.rootFolderPrefixes
         .filter((prefix) => prefix !== candidate.path && isAtOrUnder(prefix, candidate.path))
-        .sort((a, b) => a.length - b.length || a.localeCompare(b));
+        .sort((a, b) => a.length - b.length || a.localeCompare(b))
+        .map((path) => ({ id: index.rootFolders.get(path)?.id ?? 0, path }));
       // Named, and including the ones aimed below: the card lists them, because a list
       // is what refills a folder after it is pruned or re-pointed.
       const importLists = index.importLists.filter((list) =>

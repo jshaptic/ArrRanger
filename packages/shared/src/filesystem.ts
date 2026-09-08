@@ -144,6 +144,12 @@ export interface PathImportList {
   readonly path: string;
 }
 
+/** A root folder living strictly under a parent row - enough to stage a create/delete. */
+export interface PathRootFolderRef {
+  readonly id: number;
+  readonly path: string;
+}
+
 /**
  * One instance's claim on one path. Usually there is exactly one per row.
  *
@@ -180,9 +186,10 @@ export interface PathOwner {
    *
    * The reason a parent folder shows a chip at all when the library below it is still
    * empty: a configured root folder is use, and waiting for the first download to admit
-   * it made the tree lie about who owns what.
+   * it made the tree lie about who owns what. Carries the id so a parent rename can
+   * drop the old registration after the disk has moved.
    */
-  readonly rootFoldersUnder: readonly string[];
+  readonly rootFoldersUnder: readonly PathRootFolderRef[];
   /**
    * Every import list on this instance that adds media at or under this path, the ones
    * targeting it exactly first.

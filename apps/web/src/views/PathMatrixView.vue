@@ -15,7 +15,7 @@ import { basename, breadcrumbs, parentOf } from '@/lib/fs-tree';
 import { formatBytes, formatRelativeTime } from '@/lib/format';
 import { quoteFolderName } from '@/lib/new-folders';
 import {
-  rootFolderOwners,
+  alignTargetsFor,
   rootFolderTargets,
   trackedBy,
   unknownColumns,
@@ -226,20 +226,12 @@ const operationTrackedBy = computed(() =>
 );
 
 /**
- * The instances a rename can carry with it: the folder's own root-folder owners, never the
- * fleet bar's selection. This is what used to be a second row action, `align`; it is the
- * *Arr half of the one rename dialog now, chosen per instance in there.
+ * The instances a rename can carry with it: anyone rooting at this folder or under it,
+ * never the fleet bar's selection. This is what used to be a second row action, `align`;
+ * it is the *Arr half of the one rename dialog now, chosen per instance in there.
  */
 const operationAlignTargets = computed(() =>
-  operationNode.value === null
-    ? []
-    : rootFolderOwners(operationNode.value).map((owner) => ({
-        instanceId: owner.instanceId,
-        name: owner.name,
-        kind: owner.kind,
-        rootFolderId: owner.rootFolderId,
-        mediaUnder: owner.mediaUnder,
-      })),
+  operationNode.value === null ? [] : alignTargetsFor(operationNode.value),
 );
 
 /**

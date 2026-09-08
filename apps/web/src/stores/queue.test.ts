@@ -178,6 +178,60 @@ describe('fleet fan-out', () => {
     });
   });
 
+  it('a parent rename realigns each nested root folder, not the parent path', async () => {
+    const queue = useQueueStore();
+
+    await queue.stageReconcile({
+      from: '/data/media/movies/europe',
+      to: '/data/media/movies/european',
+      removeOldRootFolder: true,
+      refreshAfter: true,
+      targets: [
+        {
+          instanceId: 1,
+          fromPath: '/data/media/movies/europe/auto-feed/0k',
+          toPath: '/data/media/movies/european/auto-feed/0k',
+          mediaIds: [10, 11],
+          oldRootFolderId: 8,
+        },
+        {
+          instanceId: 1,
+          fromPath: '/data/media/movies/europe/curated-feed/0k',
+          toPath: '/data/media/movies/european/curated-feed/0k',
+          mediaIds: [12],
+          oldRootFolderId: 9,
+        },
+      ],
+    });
+
+    const ops = push.mock.calls.map((call) => call[0]?.[0]).filter((entry) => entry !== undefined);
+    expect(ops[0]).toEqual({
+      op: 'fs.rename',
+      payload: { from: '/data/media/movies/europe', to: '/data/media/movies/european' },
+    });
+    expect(ops.map((entry) => entry.op)).toEqual([
+      'fs.rename',
+      'rootFolder.create',
+      'media.moveRootFolder',
+      'media.refresh',
+      'rootFolder.delete',
+      'rootFolder.create',
+      'media.moveRootFolder',
+      'media.refresh',
+      'rootFolder.delete',
+    ]);
+    expect(ops[1]?.payload).toEqual({ path: '/data/media/movies/european/auto-feed/0k' });
+    expect(ops[5]?.payload).toEqual({ path: '/data/media/movies/european/curated-feed/0k' });
+    expect(ops[4]?.payload).toEqual({
+      rootFolderId: 8,
+      path: '/data/media/movies/europe/auto-feed/0k',
+    });
+    expect(ops[8]?.payload).toEqual({
+      rootFolderId: 9,
+      path: '/data/media/movies/europe/curated-feed/0k',
+    });
+  });
+
   it('staging nothing does not call the API', async () => {
     const queue = useQueueStore();
     await queue.propagateTag('hd', []);

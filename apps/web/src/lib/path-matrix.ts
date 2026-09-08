@@ -239,6 +239,52 @@ export function rootFolderOwners(node: PathNode): readonly PathOwner[] {
   return node.owners.filter((owner) => owner.use === 'rootFolder');
 }
 
+/**
+ * One root folder a rename of `node` can carry along - either the folder itself, or one
+ * sitting under it. The dialog checkboxes are per instance; the chain is per root.
+ */
+export interface AlignRoot {
+  readonly path: string;
+  readonly rootFolderId: number | null;
+}
+
+export interface AlignTarget {
+  readonly instanceId: number;
+  readonly name: string;
+  readonly kind: 'radarr' | 'sonarr';
+  readonly roots: readonly AlignRoot[];
+}
+
+/**
+ * Every instance a rename of this folder can realign.
+ *
+ * Rooting *at* the folder is the original case. Rooting *under* it is the one a parent
+ * rename used to miss: the disk moved, the nested registrations stayed, and *Arr marked
+ * them unavailable. Both belong on the same dialog so they cannot drift apart.
+ */
+export function alignTargetsFor(node: PathNode): AlignTarget[] {
+  const targets: AlignTarget[] = [];
+
+  for (const owner of node.owners) {
+    const roots: AlignRoot[] = [];
+    if (owner.use === 'rootFolder') {
+      roots.push({ path: node.path, rootFolderId: owner.rootFolderId });
+    }
+    for (const folder of owner.rootFoldersUnder) {
+      roots.push({ path: folder.path, rootFolderId: folder.id });
+    }
+    if (roots.length === 0) continue;
+    targets.push({
+      instanceId: owner.instanceId,
+      name: owner.name,
+      kind: owner.kind,
+      roots,
+    });
+  }
+
+  return targets;
+}
+
 export interface RootFolderCellTarget {
   readonly instanceId: number;
   readonly rootFolderId: number;
@@ -502,8 +548,8 @@ export type PathAction =
  *
  * `align` was a second row action beside `rename`, asking the same first question - the new
  * name - and differing only in whether the *Arr half was staged. It is the same dialog now:
- * `rename` offers the instances rooting at the folder as checkboxes, so the choice is made
- * where the name is typed rather than by picking the right button beforehand.
+ * `rename` offers the instances rooting at *or under* the folder as checkboxes, so the
+ * choice is made where the name is typed rather than by picking the right button beforehand.
  *
  * `remove` was a row button beside them, staging a removal for every instance rooting at
  * the folder at once. Removal is per instance, and the owner chip already names the one it

@@ -18,6 +18,7 @@ import {
   ownerFacts,
   ownerHeadline,
   ownerMedia,
+  alignTargetsFor,
   rootFolderTargets,
   SEVERITY_STYLES,
   TOP_LEVEL,
@@ -54,7 +55,7 @@ function owner(instanceId: number, use: PathUse, overrides: Partial<PathOwner> =
     mediaUnder: use === 'rootFolder' ? 0 : 1,
     mediaWithFiles: use === 'rootFolder' ? 0 : 1,
     title: use === 'tracked' ? 'A Title' : null,
-    rootFoldersUnder: use === 'containsRoot' ? ['/data/media/movies'] : [],
+    rootFoldersUnder: use === 'containsRoot' ? [{ id: 1, path: '/data/media/movies' }] : [],
     importLists: [],
     freeSpace: use === 'rootFolder' ? 1_000_000_000 : null,
     totalSpace: use === 'rootFolder' ? 4_000_000_000 : null,
@@ -374,7 +375,7 @@ describe('actionsFor', () => {
     // No media anywhere below, so the media-only rule called this safe to delete - and it
     // would have taken a configured root folder with it.
     const target = node('/data/media', {
-      owners: [owner(1, 'containsRoot', { mediaUnder: 0, rootFoldersUnder: ['/data/media/tv'] })],
+      owners: [owner(1, 'containsRoot', { mediaUnder: 0, rootFoldersUnder: [{ id: 2, path: '/data/media/tv' }] })],
     });
 
     expect(actionsFor(target)).not.toContain('prune');
@@ -395,6 +396,35 @@ describe('actionsFor', () => {
 
     expect(actions).toContain('rename');
     expect(actions).not.toContain('remap');
+  });
+
+  it('a rename can carry nested root folders, not only the folder itself', () => {
+    const parent = node('/data/media/movies/europe', {
+      owners: [
+        owner(1, 'containsRoot', {
+          mediaUnder: 0,
+          rootFoldersUnder: [
+            { id: 8, path: '/data/media/movies/europe/auto-feed/0k' },
+            { id: 9, path: '/data/media/movies/europe/curated-feed/0k' },
+          ],
+        }),
+      ],
+    });
+
+    expect(alignTargetsFor(parent)).toEqual([
+      {
+        instanceId: 1,
+        name: 'instance 1',
+        kind: 'radarr',
+        roots: [
+          { path: '/data/media/movies/europe/auto-feed/0k', rootFolderId: 8 },
+          { path: '/data/media/movies/europe/curated-feed/0k', rootFolderId: 9 },
+        ],
+      },
+    ]);
+    expect(alignTargetsFor(flagged('/data/media/movies/Dune (2021)', [], [owner(1, 'tracked')]))).toEqual(
+      [],
+    );
   });
 
   it('never offers a disk action on a mount', () => {
@@ -541,7 +571,7 @@ describe('the owner card', () => {
     expect(ownerHeadline(owner(1, 'tracked'))).toContain('A Title');
     expect(ownerHeadline(owner(1, 'ancestor'))).toBe('used for media below this folder');
     expect(
-      ownerHeadline(owner(1, 'containsRoot', { rootFoldersUnder: ['/a/x', '/a/y'] })),
+      ownerHeadline(owner(1, 'containsRoot', { rootFoldersUnder: [{ id: 1, path: '/a/x' }, { id: 2, path: '/a/y' }] })),
     ).toBe('used for 2 root folders below');
   });
 
@@ -566,7 +596,7 @@ describe('the owner card', () => {
   });
 
   it('states the use as a fact, and never a Root folder section beside it', () => {
-    const target = owner(1, 'containsRoot', { rootFoldersUnder: ['/data/media/tv'] });
+    const target = owner(1, 'containsRoot', { rootFoldersUnder: [{ id: 2, path: '/data/media/tv' }] });
 
     expect(ownerHeadline(target)).toBe('used for 1 root folder below');
     expect(ownerFacts(target, '/data/media').map((fact) => fact.label)).toEqual([
@@ -582,7 +612,7 @@ describe('the owner card', () => {
   it('names every list, and does not prefix the folder they fill', () => {
     const facts = ownerFacts(
       owner(1, 'containsRoot', {
-        rootFoldersUnder: ['/data/media/tv'],
+        rootFoldersUnder: [{ id: 2, path: '/data/media/tv' }],
         importLists: [
           { id: 1, name: 'Trakt watchlist', enabled: true, automatic: true, path: '/data/media' },
           { id: 2, name: 'Series watchlist', enabled: true, automatic: false, path: '/data/media/tv' },
@@ -631,7 +661,7 @@ describe('the owner card', () => {
     expect(rooted.some((fact) => fact.label === 'Root folder')).toBe(false);
 
     const parent = ownerFacts(
-      owner(1, 'containsRoot', { rootFoldersUnder: ['/data/media/tv'] }),
+      owner(1, 'containsRoot', { rootFoldersUnder: [{ id: 2, path: '/data/media/tv' }] }),
       '/data/media',
     );
     expect(parent[0]).toMatchObject({ label: 'Used for', value: '1 root folder below' });

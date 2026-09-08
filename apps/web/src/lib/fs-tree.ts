@@ -22,6 +22,16 @@ export function basename(target: string): string {
   return segments.at(-1) ?? target;
 }
 
+/**
+ * Rewrite `target` when it is `from` or sits under it. Separator-aware so
+ * `/data/movies` does not swallow `/data/movies-4k`.
+ */
+export function rewritePathPrefix(target: string, from: string, to: string): string {
+  if (target === from) return to;
+  if (from === '/') return to === '/' ? target : `${to}${target}`;
+  return target.startsWith(`${from}/`) ? `${to}${target.slice(from.length)}` : target;
+}
+
 export interface Breadcrumb {
   readonly label: string;
   readonly path: string;

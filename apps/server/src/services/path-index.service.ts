@@ -148,7 +148,8 @@ export class PathIndexService {
       instanceIds: usable
         .filter(
           (index) =>
-            index.rootFolders.has(normalised) || (index.mediaUnder.get(normalised) ?? 0) > 0,
+            index.rootFolderPrefixes.some((prefix) => isAtOrUnder(prefix, normalised)) ||
+            (index.mediaUnder.get(normalised) ?? 0) > 0,
         )
         .map((index) => index.instanceId),
       complete: usable.length === enabled.length,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { basename, breadcrumbs, joinPath, parentOf } from './fs-tree';
+import { basename, breadcrumbs, joinPath, parentOf, rewritePathPrefix } from './fs-tree';
 
 describe('path helpers', () => {
   it('joins and splits paths', () => {
@@ -24,5 +24,15 @@ describe('path helpers', () => {
     expect(breadcrumbs('/etc/passwd', ['/data'])).toEqual([
       { label: '/etc/passwd', path: '/etc/passwd' },
     ]);
+  });
+
+  it('rewrites a path under a renamed ancestor, never a shared prefix', () => {
+    expect(rewritePathPrefix('/data/movies/europe/auto-feed/0k', '/data/movies/europe', '/data/movies/european')).toBe(
+      '/data/movies/european/auto-feed/0k',
+    );
+    expect(rewritePathPrefix('/data/movies/europe', '/data/movies/europe', '/data/movies/european')).toBe(
+      '/data/movies/european',
+    );
+    expect(rewritePathPrefix('/data/movies-4k', '/data/movies', '/data/films')).toBe('/data/movies-4k');
   });
 });

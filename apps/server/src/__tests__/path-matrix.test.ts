@@ -913,7 +913,7 @@ describe('an owner chip states what lives below the folder, not only what sits o
     // The old rule: media under the path or no chip at all. There is no media here.
     assert.equal(owner?.mediaUnder, 0);
     assert.equal(owner?.use, 'containsRoot');
-    assert.deepEqual(owner?.rootFoldersUnder, [archivedTv()]);
+    assert.deepEqual(owner?.rootFoldersUnder, [{ id: 4, path: archivedTv() }]);
   });
 
   test('the mount reports every instance rooted anywhere beneath it', async () => {

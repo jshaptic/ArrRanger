@@ -586,15 +586,24 @@ export const useQueueStore = defineStore('queue', () => {
   }
 
   /**
-   * Reconcile & Align: rename a folder on disk, then point each selected instance at the
-   * new path *without* asking *Arr to move anything - the bytes are already there.
+   * Reconcile & Align: rename a folder on disk, then point each selected root folder at
+   * its rewritten path *without* asking *Arr to move anything - the bytes are already there.
+   *
+   * One target is one (instance, root folder) pair. A parent rename therefore stages a
+   * create/move/delete per nested registration, not one create at the parent path.
    *
    * Staged as a dependency chain, so a failed disk step means no instance is touched.
    */
   async function stageReconcile(params: {
     from: string;
     to: string;
-    targets: ReadonlyArray<{ instanceId: number; mediaIds: readonly number[]; oldRootFolderId: number | null }>;
+    targets: ReadonlyArray<{
+      instanceId: number;
+      fromPath: string;
+      toPath: string;
+      mediaIds: readonly number[];
+      oldRootFolderId: number | null;
+    }>;
     removeOldRootFolder: boolean;
     refreshAfter: boolean;
   }): Promise<void> {
@@ -613,7 +622,7 @@ export const useQueueStore = defineStore('queue', () => {
           {
             instanceId: target.instanceId,
             op: 'rootFolder.create',
-            payload: { path: params.to },
+            payload: { path: target.toPath },
             dependsOnId: renameId,
           },
         ]);
@@ -634,7 +643,7 @@ export const useQueueStore = defineStore('queue', () => {
               op: 'media.moveRootFolder',
               payload: {
                 mediaIds: [...target.mediaIds],
-                toRootFolderPath: params.to,
+                toRootFolderPath: target.toPath,
                 moveFiles: false,
               },
               dependsOnId: rootFolderId,
@@ -661,7 +670,7 @@ export const useQueueStore = defineStore('queue', () => {
             {
               instanceId: target.instanceId,
               op: 'rootFolder.delete',
-              payload: { rootFolderId: target.oldRootFolderId, path: params.from },
+              payload: { rootFolderId: target.oldRootFolderId, path: target.fromPath },
               dependsOnId: realignId,
             },
           ]);

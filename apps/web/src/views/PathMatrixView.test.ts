@@ -69,7 +69,7 @@ function owner(instanceId: number, use: PathUse, overrides: Partial<PathOwner> =
     mediaUnder: use === 'rootFolder' ? 0 : 3,
     mediaWithFiles: use === 'rootFolder' ? 0 : 3,
     title: use === 'tracked' ? 'Dune' : null,
-    rootFoldersUnder: use === 'containsRoot' ? ['/data/media/movies'] : [],
+    rootFoldersUnder: use === 'containsRoot' ? [{ id: 1, path: '/data/media/movies' }] : [],
     importLists: [],
     freeSpace: use === 'rootFolder' ? 1_000_000_000 : null,
     totalSpace: use === 'rootFolder' ? 4_000_000_000 : null,
@@ -134,7 +134,7 @@ const MEDIA = node('/data/media', {
     owner(2, 'containsRoot', {
       mediaUnder: 0,
       mediaWithFiles: 0,
-      rootFoldersUnder: ['/data/media/tv'],
+      rootFoldersUnder: [{ id: 5, path: '/data/media/tv' }],
       importLists: [
         { id: 8, name: 'Series watchlist', enabled: true, automatic: true, path: '/data/media/tv' },
         { id: 9, name: 'Kids picks', enabled: false, automatic: false, path: '/data/media/tv' },
@@ -942,6 +942,12 @@ describe('PathMatrixView', () => {
     const leftover = rowFor(wrapper, 'old-movies');
     expect(leftover?.find('[data-action="rename"]').attributes('title')).toBe('rename');
     expect(leftover?.find('[data-action="remap"]').exists()).toBe(false);
+
+    // A parent of root folders is the other rename that must carry instances - renaming
+    // it on disk alone is how nested registrations become unavailable.
+    expect(rowAt(wrapper, '/data/media').find('[data-action="rename"]').attributes('title')).toBe(
+      'rename & align',
+    );
   });
 
   it('never offers a disk action on a mount', async () => {
@@ -1097,6 +1103,18 @@ describe('PathMatrixView', () => {
     const targets = document.body.querySelector('[data-testid="align-targets"]');
     expect(targets?.textContent).toContain('Radarr-4K');
     expect(targets?.querySelector<HTMLInputElement>('input')?.checked).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('a parent of root folders opens the same align dialog for the folders under it', async () => {
+    const wrapper = await mountView();
+    const rename = rowAt(wrapper, '/data/media').find('[data-action="rename"]');
+    await rename?.trigger('click');
+    for (let tick = 0; tick < 6; tick += 1) await flushPromises();
+
+    const targets = document.body.querySelector('[data-testid="align-targets"]');
+    expect(targets?.textContent).toContain('Radarr-HD');
+    expect(targets?.textContent).toContain('/data/media/tv');
     wrapper.unmount();
   });
 

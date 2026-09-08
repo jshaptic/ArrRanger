@@ -19,9 +19,9 @@ import PathOwnerChips from './PathOwnerChips.vue';
 import { formatBytes, formatRelativeTime } from '@/lib/format';
 import {
   actionsFor,
+  alignTargetsFor,
   FLAG_STYLES,
   mediaSummary,
-  rootFolderOwners,
   SEVERITY_STYLES,
   type PathAction,
 } from '@/lib/path-matrix';
@@ -91,11 +91,11 @@ const ACTION_ICONS: Record<Exclude<PathAction, 'focus'>, Component> = {
 
 /**
  * `align` is not a button of its own any more - it is what a rename does when the folder is
- * somebody's root folder, chosen per instance inside the one dialog. The title still says
- * so, because the difference between the two renames is the whole point.
+ * somebody's root folder, or the parent of one, chosen per instance inside the one dialog.
+ * The title still says so, because the difference between the two renames is the whole point.
  */
 function labelFor(action: Exclude<PathAction, 'focus'>): string {
-  return action === 'rename' && rootFolderOwners(props.node).length > 0
+  return action === 'rename' && alignTargetsFor(props.node).length > 0
     ? 'rename & align'
     : ACTION_LABELS[action];
 }
