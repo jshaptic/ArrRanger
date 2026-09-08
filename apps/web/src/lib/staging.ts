@@ -25,6 +25,7 @@ const PRESENTATION: Record<QueueOp, OpPresentation> = {
   'tag.merge': { icon: IconMerge, label: 'Merge tags', tone: 'destroy' },
   'mediaTags.add': { icon: IconCreate, label: 'Add tags to media', tone: 'update' },
   'mediaTags.remove': { icon: IconRemove, label: 'Remove tags from media', tone: 'update' },
+  'mediaTags.set': { icon: IconEdit, label: 'Replace tags on media', tone: 'update' },
   'rootFolder.create': { icon: IconCreate, label: 'Add root folder', tone: 'create' },
   'rootFolder.delete': { icon: IconDelete, label: 'Unassign root folder', tone: 'destroy' },
   'media.moveRootFolder': { icon: IconMove, label: 'Move to root folder', tone: 'move' },
@@ -33,6 +34,9 @@ const PRESENTATION: Record<QueueOp, OpPresentation> = {
   'importList.delete': { icon: IconDelete, label: 'Delete import list', tone: 'destroy' },
   'importList.setEnabled': { icon: IconToggle, label: 'Toggle import list', tone: 'update' },
   'media.refresh': { icon: IconRefresh, label: 'Rescan library', tone: 'update' },
+  'media.setMonitored': { icon: IconToggle, label: 'Set monitored', tone: 'update' },
+  'media.setQualityProfile': { icon: IconEdit, label: 'Set quality profile', tone: 'update' },
+  'media.delete': { icon: IconDelete, label: 'Delete media', tone: 'destroy' },
   'fs.mkdir': { icon: IconCreate, label: 'Create directory', tone: 'create' },
   'fs.rename': { icon: IconEdit, label: 'Rename on disk', tone: 'move' },
   'fs.move': { icon: IconMove, label: 'Move on disk', tone: 'move' },
@@ -45,15 +49,22 @@ export function presentOp(op: QueueOp): OpPresentation {
 
 const TONE_SEVERITY: Record<OpTone, number> = { destroy: 3, move: 2, create: 1, update: 0 };
 
+/**
+ * The worse of what is already staged and one more operation.
+ *
+ * Extracted because two indexes now answer "what is staged here" - the matrix cells and the
+ * per-media one - and worst-case-wins has to mean the same thing in both.
+ */
+export function worseIntent(current: OpPresentation | null, op: QueueOp): OpPresentation {
+  const candidate = presentOp(op);
+  if (current === null) return candidate;
+  return TONE_SEVERITY[candidate.tone] > TONE_SEVERITY[current.tone] ? candidate : current;
+}
+
 /** The badge a matrix cell shows when several operations target it - worst case wins. */
 export function stagedIntent(items: readonly QueueItem[]): OpPresentation | null {
   let winner: OpPresentation | null = null;
-  for (const item of items) {
-    const candidate = presentOp(item.op);
-    if (winner === null || TONE_SEVERITY[candidate.tone] > TONE_SEVERITY[winner.tone]) {
-      winner = candidate;
-    }
-  }
+  for (const item of items) winner = worseIntent(winner, item.op);
   return winner;
 }
 
@@ -87,6 +98,17 @@ export function isDestructive(item: QueueItem): boolean {
   if (presentOp(item.op).tone === 'destroy') return true;
   if (item.op === 'fs.rename' || item.op === 'fs.move') return true;
   return item.op === 'media.moveRootFolder' && item.payload.moveFiles;
+}
+
+/**
+ * Work nothing can undo: the bytes are gone from the disk.
+ *
+ * Distinct from `isDestructive`, which covers everything worth a red badge. This one is
+ * what earns the typed confirmation, and it is deliberately a short list.
+ */
+export function isIrreversible(item: QueueItem): boolean {
+  if (item.op === 'media.delete') return item.payload.deleteFiles;
+  return item.op === 'fs.delete';
 }
 
 /** Human sentence for the impact summary, e.g. "3 tags across 4 instances". */

@@ -52,8 +52,13 @@ describe('migration 002', () => {
 
   test('keeps queue items and their audit trail through the table rebuild', () => {
     const result = runMigrations(db, MIGRATIONS_DIR);
-    assert.deepEqual(result.applied, ['002_filesystem.sql', '003_import_list_create.sql']);
-    assert.equal(result.schemaVersion, 3);
+    assert.deepEqual(result.applied, [
+      '002_filesystem.sql',
+      '003_import_list_create.sql',
+      '004_import_list_movie_snapshot.sql',
+      '005_media_bulk_ops.sql',
+    ]);
+    assert.equal(result.schemaVersion, 5);
 
     const item = db.prepare('SELECT * FROM queue_items WHERE id = 1').get() as {
       instance_id: number;
@@ -109,7 +114,7 @@ describe('migration 002', () => {
   test('is idempotent on a second boot', () => {
     const again = runMigrations(db, MIGRATIONS_DIR);
     assert.deepEqual(again.applied, []);
-    assert.equal(again.skipped, 3);
+    assert.equal(again.skipped, 5);
   });
 
   test('accepts importList.create', () => {
@@ -122,5 +127,81 @@ describe('migration 002', () => {
       op: string;
     };
     assert.equal(row.op, 'importList.create');
+  });
+
+  test('accepts the importListMovie snapshot, and still refuses an unknown resource', () => {
+    db.prepare(
+      `INSERT INTO resource_snapshots (instance_id, resource, payload)
+       VALUES (1, 'importListMovie', '[]')`,
+    ).run();
+
+    const row = db
+      .prepare("SELECT payload FROM resource_snapshots WHERE resource = 'importListMovie'")
+      .get() as { payload: string };
+    assert.equal(row.payload, '[]');
+
+    assert.throws(() =>
+      db
+        .prepare(
+          `INSERT INTO resource_snapshots (instance_id, resource, payload)
+           VALUES (1, 'nonesuch', '[]')`,
+        )
+        .run(),
+    );
+  });
+
+  test('accepts every media bulk op, and still refuses an unknown one', () => {
+    const ops = [
+      'mediaTags.set',
+      'media.setMonitored',
+      'media.setQualityProfile',
+      'media.delete',
+    ] as const;
+
+    for (const [index, op] of ops.entries()) {
+      db.prepare(
+        `INSERT INTO queue_items (instance_id, kind, sort_order, op, target_kind, target_label, summary, payload)
+         VALUES (1, 'arr', ?, ?, 'movie', '3 item(s)', 'x', '{}')`,
+      ).run(20 + index, op);
+    }
+
+    const stored = db
+      .prepare(`SELECT op FROM queue_items WHERE op IN (${ops.map(() => '?').join(', ')})`)
+      .all(...ops) as Array<{ op: string }>;
+    assert.deepEqual(
+      stored.map((row) => row.op).sort(),
+      [...ops].sort(),
+    );
+
+    assert.throws(() =>
+      db
+        .prepare(
+          `INSERT INTO queue_items (instance_id, kind, sort_order, op, target_kind, target_label, summary, payload)
+           VALUES (1, 'arr', 30, 'media.nonesuch', 'movie', 'x', 'x', '{}')`,
+        )
+        .run(),
+    );
+  });
+
+  test('the rebuilt snapshot table keeps its composite key and its cascade', () => {
+    // Rebuilding resource_snapshots is only safe while both survive: the PK is what makes
+    // put() an upsert, and the cascade is what stops a deleted instance leaving rows behind.
+    assert.throws(() =>
+      db
+        .prepare(
+          `INSERT INTO resource_snapshots (instance_id, resource, payload)
+           VALUES (1, 'importListMovie', '[1]')`,
+        )
+        .run(),
+    );
+
+    const sql = (
+      db
+        .prepare("SELECT sql FROM sqlite_master WHERE name = 'resource_snapshots'")
+        .get() as { sql: string }
+    ).sql;
+    assert.match(sql, /PRIMARY KEY \(instance_id, resource\)/);
+    assert.match(sql, /REFERENCES instances\(id\) ON DELETE CASCADE/);
+    assert.match(sql, /WITHOUT ROWID/);
   });
 });

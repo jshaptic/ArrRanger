@@ -24,6 +24,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: 'List management' },
   },
   {
+    path: '/media',
+    name: 'media',
+    component: () => import('@/views/MediaFleetView.vue'),
+    meta: { title: 'Media management', hint: 'titles across every instance' },
+  },
+  {
     path: '/queue',
     name: 'queue',
     component: () => import('@/views/QueueView.vue'),

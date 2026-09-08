@@ -81,6 +81,7 @@ function resolveTagId(payloadTagId: number, dependencyResult: Record<string, unk
 function resolveTagIds(
   payloadTagIds: readonly number[],
   dependencyResult: Record<string, unknown> | null,
+  options: { allowEmpty?: boolean } = {},
 ): number[] {
   const fromDependency = dependencyResult?.['tagId'];
   const tagIds =
@@ -88,7 +89,9 @@ function resolveTagIds(
       ? [...new Set([...payloadTagIds, fromDependency])]
       : [...payloadTagIds];
 
-  if (tagIds.length === 0) {
+  // Empty is a mistake when adding or removing, and an instruction when replacing:
+  // `mediaTags.set` with no ids means "clear them all".
+  if (tagIds.length === 0 && options.allowEmpty !== true) {
     throw new ValidationError(
       'No tag to apply - the item it depends on did not produce a tag id',
     );
@@ -165,6 +168,66 @@ export const arrHandlers: ArrQueueHandlers = {
     return { targetTagId, movedItems: moved, mergedTags: sourceTagIds.length };
   },
 
+  /**
+   * Replace, not merge. Every tag the payload does not name is gone afterwards, which is
+   * why this is a separate op rather than a mode - and why an empty list is allowed: it is
+   * how "clear all tags" is said.
+   */
+  'mediaTags.set': async (ctx, item) => {
+    const tagIds = resolveTagIds(item.payload.tagIds, ctx.dependencyResult, { allowEmpty: true });
+    const updated = await ctx.client.bulkEditMedia({
+      mediaIds: item.payload.mediaIds,
+      tags: tagIds,
+      applyTags: 'replace',
+    });
+    ctx.log(
+      'info',
+      tagIds.length === 0
+        ? `Cleared every tag on ${String(updated)} item(s)`
+        : `Replaced the tags on ${String(updated)} item(s) with ${String(tagIds.length)} tag(s)`,
+    );
+    return { updated, tagIds };
+  },
+  'media.setMonitored': async (ctx, item) => {
+    const updated = await ctx.client.bulkEditMedia({
+      mediaIds: item.payload.mediaIds,
+      monitored: item.payload.monitored,
+    });
+    ctx.log(
+      'info',
+      `${item.payload.monitored ? 'Monitoring' : 'Unmonitoring'} ${String(updated)} item(s)`,
+    );
+    return { updated, monitored: item.payload.monitored };
+  },
+  'media.setQualityProfile': async (ctx, item) => {
+    const updated = await ctx.client.bulkEditMedia({
+      mediaIds: item.payload.mediaIds,
+      qualityProfileId: item.payload.qualityProfileId,
+    });
+    // The name is logged as well as the id: the id is meaningless one instance over, and
+    // the audit trail is read long after the profile list has moved on.
+    ctx.log(
+      'info',
+      `Set quality profile "${item.payload.profileName}" (#${String(item.payload.qualityProfileId)}) on ${String(updated)} item(s)`,
+    );
+    return { updated, qualityProfileId: item.payload.qualityProfileId };
+  },
+  /**
+   * The only op in the app that destroys data outside the queue's reach. Both flags are
+   * logged explicitly, because "we deleted 137 items" and "we deleted 137 items and their
+   * files" are the two facts anyone reads this trail to tell apart.
+   */
+  'media.delete': async (ctx, item) => {
+    const { mediaIds, deleteFiles, addImportExclusion } = item.payload;
+    const deleted = await ctx.client.bulkDeleteMedia({ mediaIds, deleteFiles, addImportExclusion });
+    ctx.log(
+      'info',
+      `Deleted ${String(deleted)} item(s) - files ${
+        deleteFiles ? 'removed from disk' : 'left in place'
+      }, import exclusion ${addImportExclusion ? 'added' : 'not added'}`,
+    );
+    return { deleted, deleteFiles, addImportExclusion };
+  },
   'mediaTags.add': async (ctx, item) => {
     const tagIds = resolveTagIds(item.payload.tagIds, ctx.dependencyResult);
     const updated = await ctx.client.bulkEditMedia({

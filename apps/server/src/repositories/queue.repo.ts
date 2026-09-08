@@ -63,6 +63,10 @@ export class QueueRepository {
           throw new ValidationError(`Queue item ${item.dependsOnId} referenced by dependsOnId does not exist`);
         }
 
+        // `mediaTags.set` is deliberately absent from this guard: an empty list there means
+        // "clear every tag", which is a real instruction rather than a missing id. For add
+        // and remove an empty list can only be a mistake, unless a tag.create step is about
+        // to produce the id.
         if (
           (item.op === 'mediaTags.add' || item.op === 'mediaTags.remove') &&
           item.payload.tagIds.length === 0 &&

@@ -298,11 +298,35 @@ function segmentMatcher(source: string, substring: boolean): PathSegmentMatcher 
   return { source, matches: (name) => expression.test(name.toLowerCase()) };
 }
 
-function compile(pattern: string): PathFilterTerm | null {
+/**
+ * One expanded pattern, compiled to a matcher per segment.
+ *
+ * Exported because the media filter's `path:` and `root:` fields are judged by this very
+ * rule: one matcher, one verdict, so the two boxes cannot disagree about what a path
+ * pattern means.
+ */
+export function compilePathPattern(pattern: string): PathFilterTerm | null {
   const parts = pattern.split('/').filter((segment) => segment.length > 0);
   if (parts.length === 0) return null;
   const substring = parts.length === 1;
   return { pattern, segments: parts.map((part) => segmentMatcher(part, substring)) };
+}
+
+/**
+ * A matcher for one value, in whichever of the two readings the caller needs.
+ *
+ * `contains` is the search-box rule: no glob means "contains", a glob means "is". The media
+ * filter uses it for every text field, and it has to be *this* function so that `matrix`
+ * cannot find "The Matrix (1999)" in one box and miss it in the other.
+ *
+ * `exact` is the same code with the substring shortcut off, which is what a name needs: a
+ * tag is an identity, not prose, so `tags:4k` must not match a tag called `4k-remux`.
+ */
+export function compileValueMatcher(
+  source: string,
+  mode: 'contains' | 'exact' = 'contains',
+): PathSegmentMatcher {
+  return segmentMatcher(source, mode === 'contains');
 }
 
 /** Blank, unparseable or expanding to nothing - all three mean "do not filter". */
@@ -316,7 +340,7 @@ export function parsePathFilter(source: string, mode: PathFilterMode = 'include'
 
   try {
     const patterns = expandBraces(trimmed);
-    const terms = patterns.map(compile).filter((term): term is PathFilterTerm => term !== null);
+    const terms = patterns.map(compilePathPattern).filter((term): term is PathFilterTerm => term !== null);
     return { ...base, patterns, terms, error: null, active: terms.length > 0 };
   } catch (caught) {
     const error = caught instanceof Error ? caught.message : 'could not be read';

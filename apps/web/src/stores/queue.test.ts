@@ -58,6 +58,13 @@ function item(op: QueueOp, instanceId: number | null, overrides: Partial<QueueIt
     'tag.delete': { tagId: 1, label: 'hd', detachFromMedia: true },
     'rootFolder.create': { path: '/data/media' },
     'media.moveRootFolder': { mediaIds: [1], toRootFolderPath: '/data/media-4k', moveFiles: false },
+    'mediaTags.add': { mediaIds: [1], tagIds: [7] },
+    'mediaTags.remove': { mediaIds: [1], tagIds: [7] },
+    'mediaTags.set': { mediaIds: [1], tagIds: [7] },
+    'media.refresh': { mediaIds: [1] },
+    'media.setMonitored': { mediaIds: [1], monitored: false },
+    'media.setQualityProfile': { mediaIds: [1], qualityProfileId: 4, profileName: 'Ultra-HD' },
+    'media.delete': { mediaIds: [1], deleteFiles: false, addImportExclusion: false },
     'fs.rename': { from: '/data/media/movies', to: '/data/media/films' },
     'fs.delete': { path: '/data/media/movies', recursive: true, force: false },
   };
@@ -288,5 +295,62 @@ describe('staged overlay and impact', () => {
     expect(queue.stagedForPath('/data/media/movies')).toHaveLength(1);
     expect(queue.stagedForPath('/data/media/films')).toHaveLength(1);
     expect(queue.stagedForPath('/data/media/other')).toEqual([]);
+  });
+});
+
+describe('the per-media staged index', () => {
+  /**
+   * Every op that names media ids has to appear here.
+   *
+   * `mediaIdsOf` is a second exhaustive switch with a `default`, so forgetting a new media op
+   * there compiles cleanly and silently loses the row's staged cue. One assertion per op is
+   * what turns that into a failing test instead.
+   */
+  const MEDIA_OPS = [
+    'mediaTags.add',
+    'mediaTags.remove',
+    'mediaTags.set',
+    'media.moveRootFolder',
+    'media.refresh',
+    'media.setMonitored',
+    'media.setQualityProfile',
+    'media.delete',
+  ] as const;
+
+  it('sees every operation that names a media id', async () => {
+    for (const op of MEDIA_OPS) {
+      setActivePinia(createPinia());
+      nextId = 1;
+      const queue = useQueueStore();
+      list.mockResolvedValue({ items: [item(op, 3)], activeRun: null });
+      await queue.load();
+
+      expect(queue.stagedIntentForMedia(3, 1), op).not.toBeNull();
+    }
+  });
+
+  it('answers nothing for an id nobody staged, and for a filesystem op', async () => {
+    const queue = useQueueStore();
+    list.mockResolvedValue({
+      items: [item('media.delete', 3), item('fs.rename', null)],
+      activeRun: null,
+    });
+    await queue.load();
+
+    expect(queue.stagedIntentForMedia(3, 1)).not.toBeNull();
+    expect(queue.stagedIntentForMedia(3, 99)).toBeNull();
+    expect(queue.stagedIntentForMedia(4, 1)).toBeNull();
+  });
+
+  it('reports the worst intent when two operations name one id', async () => {
+    const queue = useQueueStore();
+    list.mockResolvedValue({
+      items: [item('media.setMonitored', 3), item('media.delete', 3)],
+      activeRun: null,
+    });
+    await queue.load();
+
+    // update vs destroy: the row has to warn about the delete, not the monitor flip
+    expect(queue.stagedIntentForMedia(3, 1)?.tone).toBe('destroy');
   });
 });

@@ -36,6 +36,32 @@ export interface FakeMedia {
   hasFile?: boolean;
   /** An extra field the client must preserve but never parses. */
   images: Array<{ coverType: string; remoteUrl: string }>;
+  // What `/media` identifies and filters on. Optional so an item can deliberately have
+  // none of it and fall down the identity ladder.
+  tmdbId?: number;
+  tvdbId?: number;
+  imdbId?: string;
+  titleSlug?: string;
+  status?: string;
+  added?: string;
+  genres?: string[];
+  certification?: string;
+  studio?: string;
+  network?: string;
+  seriesType?: string;
+  /** Sonarr keeps size and file counts here rather than at the top level. */
+  statistics?: { episodeCount?: number; episodeFileCount?: number; sizeOnDisk?: number };
+}
+
+/** One entry of what an import list currently holds. Radarr only. */
+export interface FakeImportListMovie {
+  tmdbId: number;
+  title: string;
+  lists: number[];
+  isExisting: boolean;
+  isExcluded?: boolean;
+  /** Poster URLs are why the snapshot stores a projection rather than the raw body. */
+  remotePoster?: string;
 }
 
 export interface FakeImportList {
@@ -75,6 +101,7 @@ export interface FakeArrState {
   rootFolders: FakeRootFolder[];
   media: FakeMedia[];
   importLists: FakeImportList[];
+  importListMovies: FakeImportListMovie[];
   qualityProfiles: FakeQualityProfile[];
   commands: FakeCommand[];
 }
@@ -93,7 +120,13 @@ export interface FakeArrServer {
   readonly kind: 'radarr' | 'sonarr';
   readonly state: FakeArrState;
   readonly behaviour: FakeArrBehaviour;
-  readonly requests: Array<{ method: string; path: string }>;
+  readonly requests: Array<{ method: string; path: string; query?: string }>;
+  /** Every bulk delete, with both flags as they arrived - the audit the tests assert on. */
+  readonly deleted: Array<{
+    mediaIds: number[];
+    deleteFiles: boolean;
+    addImportExclusion: boolean;
+  }>;
   close(): Promise<void>;
 }
 
@@ -150,6 +183,18 @@ function defaultState(): FakeArrState {
         secretServerField: 'must-survive-put',
       },
     ],
+    importListMovies: [
+      // Arrival is media id 10, so tmdbId 100_010 - in the library, and joinable to a row.
+      {
+        tmdbId: 100_010,
+        title: 'Arrival',
+        lists: [1],
+        isExisting: true,
+        remotePoster: 'https://example.invalid/poster.jpg',
+      },
+      // Not in the library: the projection drops it, which is what bounds the payload.
+      { tmdbId: 999_999, title: 'Not Added Yet', lists: [1], isExisting: false },
+    ],
   };
 }
 
@@ -166,6 +211,13 @@ function makeMedia(id: number, title: string, path: string, tags: number[]): Fak
     year: 2000 + (id % 20),
     sizeOnDisk: id * 1_000_000,
     images: [{ coverType: 'poster', remoteUrl: `https://example.invalid/${id}.jpg` }],
+    // Stable across instances on purpose: the same film on two Radarrs has to be one row.
+    tmdbId: 100_000 + id,
+    imdbId: `tt${String(1_000_000 + id)}`,
+    titleSlug: `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${String(100_000 + id)}`,
+    status: 'released',
+    added: '2024-01-15T10:00:00Z',
+    genres: ['Drama'],
   };
 }
 
@@ -180,7 +232,8 @@ export async function startFakeArr(
   const apiKey = options.apiKey ?? 'fake-api-key-0123456789';
   const state = defaultState();
   const behaviour: FakeArrBehaviour = { delayMs: 0, rejectTagLabel: null, serveHtml: false };
-  const requests: Array<{ method: string; path: string }> = [];
+  const requests: Array<{ method: string; path: string; query?: string }> = [];
+  const deleted: FakeArrServer['deleted'] = [];
 
   const mediaPath = kind === 'radarr' ? '/movie' : '/series';
   const idKey = kind === 'radarr' ? 'movieIds' : 'seriesIds';
@@ -225,7 +278,7 @@ export async function startFakeArr(
     const url = new URL(req.url ?? '/', 'http://fake.local');
     const path = url.pathname.replace(/^\/api\/v3/, '');
     const method = req.method ?? 'GET';
-    requests.push({ method, path });
+    requests.push({ method, path, ...(url.search === '' ? {} : { query: url.search }) });
 
     if (behaviour.delayMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, behaviour.delayMs));
@@ -354,6 +407,20 @@ export async function startFakeArr(
       send(res, 200, media);
       return;
     }
+    if (method === 'DELETE' && path === `${mediaPath}/editor`) {
+      const body = await readBody(req);
+      const ids = (body[idKey] as number[] | undefined) ?? [];
+      // The exclusion flag is spelled differently by each app; a client that guesses wrong
+      // deletes the item and records no exclusion, so the fake reads only its own spelling.
+      const exclusionKey = kind === 'radarr' ? 'addImportExclusion' : 'addImportListExclusion';
+      deleted.push({
+        mediaIds: [...ids],
+        deleteFiles: body['deleteFiles'] === true,
+        addImportExclusion: body[exclusionKey] === true,
+      });
+      state.media = state.media.filter((m) => !ids.includes(m.id));
+      return send(res, 200, '');
+    }
     if (method === 'PUT' && path === `${mediaPath}/editor`) {
       const body = await readBody(req);
       const ids = (body[idKey] as number[] | undefined) ?? [];
@@ -367,6 +434,10 @@ export async function startFakeArr(
       const applyTags = body['applyTags'] as string | undefined;
       const rootFolderPath = body['rootFolderPath'] as string | undefined;
       const moveFiles = body['moveFiles'] === true;
+      // Like the real editor: only the keys actually present are touched, so a tag edit and
+      // a monitored flip stay independent.
+      const monitored = body['monitored'] as boolean | undefined;
+      const qualityProfileId = body['qualityProfileId'] as number | undefined;
 
       for (const media of targets) {
         if (applyTags === 'add') {
@@ -386,6 +457,15 @@ export async function startFakeArr(
           media.rootFolderPath = rootFolderPath;
           // Radarr only rewrites the path on disk when moveFiles is set.
           if (moveFiles) media.path = `${rootFolderPath}/${leaf}`;
+        }
+
+        if (monitored !== undefined) media.monitored = monitored;
+        if (qualityProfileId !== undefined) {
+          const profile = state.qualityProfiles.find((p) => p.id === qualityProfileId);
+          if (!profile) {
+            return send(res, 400, validationFailure('QualityProfileId', 'Profile does not exist'));
+          }
+          media.qualityProfileId = qualityProfileId;
         }
       }
 
@@ -413,6 +493,14 @@ export async function startFakeArr(
     }
 
     // -------------------------------------------------------- import lists
+    if (method === 'GET' && path === '/importlist/movie') {
+      if (kind !== 'radarr') {
+        // Sonarr has no such route, and the 404 is exactly what makes list membership
+        // unknown there rather than empty.
+        return send(res, 404, { message: 'Not Found' });
+      }
+      return send(res, 200, state.importListMovies);
+    }
     if (method === 'GET' && path === '/importlist') {
       send(res, 200, state.importLists);
       return;
@@ -472,6 +560,7 @@ export async function startFakeArr(
     state,
     behaviour,
     requests,
+    deleted,
     close: () =>
       new Promise<void>((resolve, reject) => {
         server.closeAllConnections();

@@ -1,5 +1,6 @@
 import {
   arrCommandSchema,
+  arrImportListMovieSchema,
   arrImportListSchema,
   arrMediaSchema,
   arrQualityProfileSchema,
@@ -12,6 +13,7 @@ import {
   toResources,
   type ArrCommand,
   type ArrImportList,
+  type ArrImportListMovie,
   type ArrJson,
   type ArrMedia,
   type ArrQualityProfile,
@@ -24,7 +26,7 @@ import {
   type InstanceWithKey,
   type MediaKind,
 } from '@arrranger/shared';
-import { ArrApiError } from '../lib/errors.js';
+import { ArrApiError, ValidationError } from '../lib/errors.js';
 import {
   arrRequest,
   type ArrHttpTrace,
@@ -49,6 +51,18 @@ const MEDIA_EDITOR_ID_KEY: Record<MediaKind, string> = {
   series: 'seriesIds',
 };
 
+/**
+ * The same flag, spelled differently by each app - the enableAuto/enableAutomaticAdd family.
+ *
+ * Worth a constant rather than a guess: *Arr ignores a key it does not recognise, so a
+ * misspelling here deletes the item without recording the exclusion and the next list sync
+ * brings it straight back.
+ */
+const MEDIA_EXCLUSION_KEY: Record<MediaKind, string> = {
+  movie: 'addImportExclusion',
+  series: 'addImportListExclusion',
+};
+
 /** Query params that keep the media list payload small. */
 const MEDIA_LIGHT_QUERY: Record<MediaKind, Record<string, string>> = {
   movie: { excludeLocalCovers: 'true' },
@@ -66,6 +80,14 @@ export interface BulkEditParams {
   readonly moveFiles?: boolean;
   readonly monitored?: boolean;
   readonly qualityProfileId?: number;
+}
+
+export interface BulkDeleteParams {
+  readonly mediaIds: readonly number[];
+  /** The destructive one: the files leave the disk and ArrRanger cannot put them back. */
+  readonly deleteFiles: boolean;
+  /** Without it, the next import-list sync may re-add everything just removed. */
+  readonly addImportExclusion: boolean;
 }
 
 export interface MediaPage {
@@ -268,6 +290,30 @@ export class ArrClient {
     return Array.isArray(response) ? response.length : params.mediaIds.length;
   }
 
+  /**
+   * DELETE /{movie|series}/editor - the only bulk delete.
+   *
+   * Both flags are always sent explicitly. `deleteFiles` decides whether this is a
+   * bookkeeping change or an irreversible one, and defaulting either of them would leave
+   * that to whatever the *Arr version happens to assume.
+   */
+  async bulkDeleteMedia(params: BulkDeleteParams): Promise<number> {
+    if (params.mediaIds.length === 0) return 0;
+
+    await this.request<void>({
+      method: 'DELETE',
+      path: MEDIA_EDITOR_PATH[this.mediaKind],
+      body: {
+        [MEDIA_EDITOR_ID_KEY[this.mediaKind]]: [...params.mediaIds],
+        deleteFiles: params.deleteFiles,
+        [MEDIA_EXCLUSION_KEY[this.mediaKind]]: params.addImportExclusion,
+      },
+    });
+
+    // Both apps answer with an empty body, so the request is the only acknowledgement.
+    return params.mediaIds.length;
+  }
+
   // ----------------------------------------------------------- quality profiles
 
   async listQualityProfiles(): Promise<ArrResource<ArrQualityProfile>[]> {
@@ -278,6 +324,34 @@ export class ArrClient {
 
   async listImportLists(): Promise<ArrResource<ArrImportList>[]> {
     return toResources(arrImportListSchema, await this.request<unknown>({ path: '/importlist' }));
+  }
+
+  /**
+   * What this instance's import lists currently hold. **Radarr only.**
+   *
+   * Sonarr's V3 API exposes list configuration and exclusions but no list *contents*, so
+   * there is nothing to call there - which is why `/media` reports list membership on a
+   * Sonarr instance as unknown rather than empty. Asking a Sonarr client is a bug, so it
+   * throws rather than returning a plausible empty array.
+   *
+   * The three discovery flags are sent explicitly even though they default false: with them
+   * off, Radarr answers from its own cached list entries and reaches nothing upstream.
+   */
+  async listImportListMovies(): Promise<ArrResource<ArrImportListMovie>[]> {
+    if (this.mediaKind !== 'movie') {
+      throw new ValidationError('import list contents are only available on Radarr');
+    }
+    return toResources(
+      arrImportListMovieSchema,
+      await this.request<unknown>({
+        path: '/importlist/movie',
+        query: {
+          includeRecommendations: 'false',
+          includeTrending: 'false',
+          includePopular: 'false',
+        },
+      }),
+    );
   }
 
   async getImportList(importListId: number): Promise<ArrResource<ArrImportList>> {

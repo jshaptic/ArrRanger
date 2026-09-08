@@ -14,6 +14,7 @@ import { computed, ref } from 'vue';
 import { ApiRequestError } from '@/api/client';
 import { queueApi } from '@/api/queue';
 import type { ReplacementPreview } from '@/lib/matrix';
+import { worseIntent, type OpPresentation } from '@/lib/staging';
 import { useInstancesStore } from './instances';
 import { useUiStore } from './ui';
 
@@ -57,7 +58,45 @@ export interface ImportListTarget {
   readonly importListId: number;
 }
 
+/**
+ * One instance's share of a media selection.
+ *
+ * Always batched: a 300-title selection across two Radarrs is two queue items, not six
+ * hundred. The ids come from the server's answer to the current filter, never from the
+ * page the browser happens to be holding.
+ */
+export interface MediaTarget {
+  readonly instanceId: number;
+  readonly mediaIds: readonly number[];
+}
+
+/** What tags to end up with on one instance, once its missing labels have been created. */
+export interface MediaTagTarget extends MediaTarget {
+  /** Ids that already exist on this instance. */
+  readonly tagIds: readonly number[];
+  /** Labels this instance does not have yet - each becomes a `tag.create` to depend on. */
+  readonly missingLabels: readonly string[];
+}
+
+/** Where one instance's copies should end up. Paths are never translated between them. */
+export interface MediaMoveTarget extends MediaTarget {
+  readonly toRootFolderPath: string;
+  /** Set when that path is not a root folder on this instance yet. */
+  readonly needsRootFolder: boolean;
+}
+
+/** The profile id this instance resolved the chosen *name* to. */
+export interface MediaProfileTarget extends MediaTarget {
+  readonly qualityProfileId: number;
+}
+
 const STAGED_STATUSES = new Set<QueueItem['status']>(['pending', 'running', 'failed']);
+
+/** "12 item(s) on 2 instance(s)" - both numbers, because either alone reads as the other. */
+function countOf(targets: readonly { mediaIds: readonly number[] }[]): string {
+  const items = targets.reduce((sum, target) => sum + target.mediaIds.length, 0);
+  return `${String(items)} item(s) on ${String(targets.length)} instance(s)`;
+}
 
 /** Filesystem work has no instance, so it groups under one pseudo-instance in the UI. */
 export const LOCAL_STORAGE_GROUP = -1;
@@ -70,6 +109,30 @@ function stageKey(instanceId: number | null, kind: TargetKind, label: string): s
  * Which fleet cells an item is about, so the matrix can mark them as staged. A rename
  * touches two labels: the one disappearing and the one arriving.
  */
+/**
+ * The media ids an operation names.
+ *
+ * A second exhaustive switch, and the `default` here is the only acceptable one in this
+ * file: it enumerates the ops that carry no media id at all. A new *media* op still has to
+ * be listed, because forgetting it means the row shows no staged cue - which the store test
+ * asserts one op at a time.
+ */
+function mediaIdsOf(item: QueueItem): readonly number[] {
+  switch (item.op) {
+    case 'mediaTags.add':
+    case 'mediaTags.remove':
+    case 'mediaTags.set':
+    case 'media.moveRootFolder':
+    case 'media.refresh':
+    case 'media.setMonitored':
+    case 'media.setQualityProfile':
+    case 'media.delete':
+      return item.payload.mediaIds;
+    default:
+      return [];
+  }
+}
+
 function stageKeysFor(item: QueueItem): string[] {
   switch (item.op) {
     case 'tag.create':
@@ -97,10 +160,17 @@ function stageKeysFor(item: QueueItem): string[] {
       return [stageKey(item.instanceId, 'importList', String(item.payload.importListId))];
     case 'mediaTags.add':
     case 'mediaTags.remove':
+    case 'mediaTags.set':
       return item.payload.tagIds.map((tagId) =>
         stageKey(item.instanceId, 'tag', `#${String(tagId)}`),
       );
+    // These name media ids, not fleet cells. Fanning this index out over thousands of them
+    // would rebuild a map of concatenated strings on every queue change, for the benefit of
+    // views that do not read it - `stagedMediaIntent` below answers the media question.
     case 'media.refresh':
+    case 'media.setMonitored':
+    case 'media.setQualityProfile':
+    case 'media.delete':
       return [];
     case 'fs.mkdir':
     case 'fs.delete':
@@ -209,6 +279,35 @@ export const useQueueStore = defineStore('queue', () => {
     }
     return index;
   });
+
+  /**
+   * What is staged against one media item on one instance.
+   *
+   * A second index rather than more keys in `stagedIndex`, because a single move can name
+   * five thousand ids: minting a concatenated string and an array per id would rebuild that
+   * much garbage on every queue change, for a lookup only this one view performs. Here each
+   * entry is a number key pointing at one of the ~20 module-level presentation objects, so
+   * the whole thing is one pass and an O(1) read.
+   */
+  const stagedMediaIntent = computed(() => {
+    const index = new Map<number, Map<number, OpPresentation>>();
+    for (const item of staged.value) {
+      const instanceId = item.instanceId;
+      if (instanceId === null) continue;
+      const mediaIds = mediaIdsOf(item);
+      if (mediaIds.length === 0) continue;
+
+      const perInstance = index.get(instanceId) ?? new Map<number, OpPresentation>();
+      for (const mediaId of mediaIds) {
+        perInstance.set(mediaId, worseIntent(perInstance.get(mediaId) ?? null, item.op));
+      }
+      index.set(instanceId, perInstance);
+    }
+    return index;
+  });
+
+  const stagedIntentForMedia = (instanceId: number, mediaId: number): OpPresentation | null =>
+    stagedMediaIntent.value.get(instanceId)?.get(mediaId) ?? null;
 
   const stagedForTag = (instanceId: number, label: string): QueueItem[] =>
     stagedIndex.value.get(stageKey(instanceId, 'tag', label)) ?? [];
@@ -816,6 +915,208 @@ export const useQueueStore = defineStore('queue', () => {
     }
   }
 
+  // ------------------------------------------------------------------ media bulk work
+
+  function setMediaMonitored(
+    targets: readonly MediaTarget[],
+    monitored: boolean,
+  ): Promise<QueueItem[]> {
+    return push(
+      targets.map((target) => ({
+        instanceId: target.instanceId,
+        op: 'media.setMonitored' as const,
+        payload: { mediaIds: [...target.mediaIds], monitored },
+      })),
+      `${monitored ? 'monitor' : 'unmonitor'} ${countOf(targets)}`,
+    );
+  }
+
+  function refreshMediaAcross(targets: readonly MediaTarget[]): Promise<QueueItem[]> {
+    return push(
+      targets.map((target) => ({
+        instanceId: target.instanceId,
+        op: 'media.refresh' as const,
+        payload: { mediaIds: [...target.mediaIds] },
+      })),
+      `a rescan of ${countOf(targets)}`,
+    );
+  }
+
+  function setMediaQualityProfile(
+    targets: readonly MediaProfileTarget[],
+    profileName: string,
+  ): Promise<QueueItem[]> {
+    return push(
+      targets.map((target) => ({
+        instanceId: target.instanceId,
+        op: 'media.setQualityProfile' as const,
+        payload: {
+          mediaIds: [...target.mediaIds],
+          // Resolved per instance: the same name is a different id on each of them.
+          qualityProfileId: target.qualityProfileId,
+          profileName,
+        },
+      })),
+      `quality profile "${profileName}" on ${countOf(targets)}`,
+    );
+  }
+
+  function deleteMediaAcross(
+    targets: readonly MediaTarget[],
+    options: { deleteFiles: boolean; addImportExclusion: boolean },
+  ): Promise<QueueItem[]> {
+    return push(
+      targets.map((target) => ({
+        instanceId: target.instanceId,
+        op: 'media.delete' as const,
+        payload: {
+          mediaIds: [...target.mediaIds],
+          deleteFiles: options.deleteFiles,
+          addImportExclusion: options.addImportExclusion,
+        },
+      })),
+      `deletion of ${countOf(targets)}${options.deleteFiles ? ' and their files' : ''}`,
+    );
+  }
+
+  /**
+   * Tag work, with the missing labels created first.
+   *
+   * The same label is a different id on every instance, and may not exist at all - so a
+   * label nobody has becomes a `tag.create` that the tag edit then depends on. Two batches,
+   * sequentially, because a dependency id only exists once the first batch is inserted;
+   * and one dependent item per missing label, because `dependsOnId` is a single column.
+   */
+  async function applyMediaTags(params: {
+    mode: 'add' | 'remove' | 'replace';
+    targets: readonly MediaTagTarget[];
+  }): Promise<void> {
+    const { mode, targets } = params;
+    if (targets.length === 0) {
+      ui.notify('info', 'Nothing to tag - no instance was in range');
+      return;
+    }
+
+    busy.value = true;
+    try {
+      // Removing cannot create: a label an instance does not have is nothing to take away.
+      const creating = mode === 'remove' ? [] : targets.flatMap((target) =>
+        target.missingLabels.map((label) => ({ instanceId: target.instanceId, label })),
+      );
+      const createdIds = new Map<string, number>();
+
+      if (creating.length > 0) {
+        const response = await queueApi.push(
+          creating.map((entry) => ({
+            instanceId: entry.instanceId,
+            op: 'tag.create' as const,
+            payload: { label: entry.label },
+          })),
+        );
+        response.items.forEach((item, index) => {
+          const entry = creating[index];
+          if (entry !== undefined) {
+            createdIds.set(`${String(entry.instanceId)}|${entry.label}`, item.id);
+          }
+        });
+      }
+
+      const batch: NewQueueItem[] = [];
+      for (const target of targets) {
+        const op =
+          mode === 'add' ? 'mediaTags.add' : mode === 'remove' ? 'mediaTags.remove' : 'mediaTags.set';
+
+        // The ids that already exist go in one item. `set` needs it even when the list is
+        // empty - that is how "clear everything else" is said - while add and remove have
+        // nothing to do without one.
+        if (target.tagIds.length > 0 || mode === 'replace') {
+          batch.push({
+            instanceId: target.instanceId,
+            op,
+            payload: { mediaIds: [...target.mediaIds], tagIds: [...target.tagIds] },
+          } as NewQueueItem);
+        }
+
+        // Then one dependent add per label being created, since each can wait on only one.
+        for (const label of mode === 'remove' ? [] : target.missingLabels) {
+          const dependsOnId = createdIds.get(`${String(target.instanceId)}|${label}`);
+          if (dependsOnId === undefined) continue;
+          batch.push({
+            instanceId: target.instanceId,
+            op: 'mediaTags.add',
+            payload: { mediaIds: [...target.mediaIds], tagIds: [] },
+            dependsOnId,
+          });
+        }
+      }
+
+      await push(batch, `tag changes on ${countOf(targets)}`);
+    } catch (caught) {
+      ui.notify('error', `Could not stage the tag changes: ${messageOf(caught)}`);
+      await load();
+    } finally {
+      busy.value = false;
+    }
+  }
+
+  /**
+   * Move copies to a root folder chosen **per instance**.
+   *
+   * `remapRootFolder` cannot serve here: it takes one destination for the whole fleet, and
+   * paths are never translated between instances, so each one names its own.
+   */
+  async function moveMediaAcross(params: {
+    targets: readonly MediaMoveTarget[];
+    moveFiles: boolean;
+  }): Promise<void> {
+    const { targets, moveFiles } = params;
+    if (targets.length === 0) {
+      ui.notify('info', 'Nothing to move - no instance was in range');
+      return;
+    }
+
+    busy.value = true;
+    try {
+      const creators = targets.filter((target) => target.needsRootFolder);
+      const created = new Map<number, number>();
+
+      if (creators.length > 0) {
+        const response = await queueApi.push(
+          creators.map((target) => ({
+            instanceId: target.instanceId,
+            op: 'rootFolder.create' as const,
+            payload: { path: target.toRootFolderPath },
+          })),
+        );
+        for (const item of response.items) {
+          if (item.instanceId !== null) created.set(item.instanceId, item.id);
+        }
+      }
+
+      await push(
+        targets.map((target): NewQueueItem => {
+          const dependsOnId = created.get(target.instanceId);
+          return {
+            instanceId: target.instanceId,
+            op: 'media.moveRootFolder',
+            payload: {
+              mediaIds: [...target.mediaIds],
+              toRootFolderPath: target.toRootFolderPath,
+              moveFiles,
+            },
+            ...(dependsOnId === undefined ? {} : { dependsOnId }),
+          };
+        }),
+        `a move of ${countOf(targets)}${moveFiles ? ' - files will move on disk' : ''}`,
+      );
+    } catch (caught) {
+      ui.notify('error', `Could not stage the move: ${messageOf(caught)}`);
+      await load();
+    } finally {
+      busy.value = false;
+    }
+  }
+
   return {
     items,
     activeRun,
@@ -834,6 +1135,13 @@ export const useQueueStore = defineStore('queue', () => {
     groupedByInstance,
     executionOrder,
     stagedForTag,
+    stagedIntentForMedia,
+    applyMediaTags,
+    moveMediaAcross,
+    setMediaMonitored,
+    setMediaQualityProfile,
+    deleteMediaAcross,
+    refreshMediaAcross,
     stagedForRootFolder,
     stagedForImportList,
     stagedForImportListName,

@@ -7,6 +7,7 @@ import StagingDrawer from '@/components/staging/StagingDrawer.vue';
 import { usePathsStore } from '@/stores/paths';
 import { useInstancesStore } from '@/stores/instances';
 import { useMatrixStore } from '@/stores/matrix';
+import { useMediaStore } from '@/stores/media';
 import { useQueueStore } from '@/stores/queue';
 import { useUiStore } from '@/stores/ui';
 
@@ -20,6 +21,7 @@ const NAV: readonly NavItem[] = [
   { to: '/tags', label: 'Tag parity', hint: 'fleet-wide tag matrix' },
   { to: '/paths', label: 'Paths', hint: 'root folders & storage in one matrix' },
   { to: '/import-lists', label: 'Import lists', hint: 'settings comparison' },
+  { to: '/media', label: 'Media', hint: 'movies & series across the fleet' },
   { to: '/queue', label: 'Queue', hint: 'staged operations' },
   { to: '/instances', label: 'Instances', hint: 'connections' },
 ];
@@ -28,6 +30,7 @@ const route = useRoute();
 const ui = useUiStore();
 const instances = useInstancesStore();
 const matrix = useMatrixStore();
+const media = useMediaStore();
 const queue = useQueueStore();
 const paths = usePathsStore();
 
@@ -40,13 +43,15 @@ onMounted(async () => {
   if (queue.staged.length > 0) ui.openDrawer();
 });
 
-// A finished run invalidates the joined view: the disk, the root folders, or both.
+// A finished run invalidates every joined view: the disk, the root folders, the libraries.
+// `/media` is refreshed only if it has been opened - the fleet-wide read is expensive, and
+// nothing outside that route reads the store.
 watch(
   () => queue.activeRun?.status,
   (status, previous) => {
-    if (previous === 'running' && status !== 'running' && paths.enabled) {
-      void paths.refreshAll();
-    }
+    if (previous !== 'running' || status === 'running') return;
+    if (paths.enabled) void paths.refreshAll();
+    if (media.loadedOnce) void media.load({ refresh: true });
   },
 );
 </script>

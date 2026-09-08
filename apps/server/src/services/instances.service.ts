@@ -17,6 +17,14 @@ export interface InstancesServiceDeps {
   readonly instances: InstancesRepository;
   readonly snapshots: SnapshotsRepository;
   readonly dispatchers: ArrDispatcherPool;
+  /**
+   * Called whenever the set of instances, or how to reach one, changes.
+   *
+   * The joined views memoise on top of the snapshot cache, so without this an instance
+   * just added would not appear - and one just removed would keep contributing rows - for
+   * up to 30 seconds.
+   */
+  readonly onInstancesChanged?: () => void;
 }
 
 export interface InstanceWriteResult {
@@ -44,6 +52,7 @@ export class InstancesService {
    */
   async create(input: CreateInstance): Promise<InstanceWriteResult> {
     const instance = this.deps.instances.create(input);
+    this.deps.onInstancesChanged?.();
     const test = await this.testSaved(instance.id);
     return { instance: this.deps.instances.require(instance.id), test };
   }
@@ -56,6 +65,8 @@ export class InstancesService {
       await this.deps.dispatchers.invalidate(id);
       this.deps.snapshots.invalidate(id);
     }
+    // Also on an `enabled` flip, which changes which instances the joined views read at all.
+    this.deps.onInstancesChanged?.();
 
     const test = await this.testSaved(instance.id);
     return { instance: this.deps.instances.require(instance.id), test };
@@ -64,6 +75,7 @@ export class InstancesService {
   async remove(id: number): Promise<void> {
     this.deps.instances.remove(id);
     await this.deps.dispatchers.invalidate(id);
+    this.deps.onInstancesChanged?.();
   }
 
   /** Probes a stored instance and records the outcome on the row. */

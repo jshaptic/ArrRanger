@@ -86,11 +86,35 @@ export const arrImportListSchema = z.object({
 });
 export type ArrImportList = z.infer<typeof arrImportListSchema>;
 
-/** Minimal projection of a movie/series row, enough for the bulk-selection grid. */
+/**
+ * Sonarr's per-series rollup. Narrow on purpose: it is here because Sonarr has no
+ * top-level `sizeOnDisk` and no `hasFile`, so without it "how big is this" and "is
+ * anything on disk" are unanswerable for every series - and an unanswerable question
+ * rendered as `false` is exactly the unknown-as-missing bug this codebase refuses.
+ */
+export const arrMediaStatisticsSchema = z.object({
+  episodeCount: z.number().int().optional(),
+  episodeFileCount: z.number().int().optional(),
+  sizeOnDisk: z.number().optional(),
+  percentOfEpisodes: z.number().optional(),
+});
+export type ArrMediaStatistics = z.infer<typeof arrMediaStatisticsSchema>;
+
+/**
+ * Projection of a movie/series row for the bulk-selection grid.
+ *
+ * Every field here is rendered, sorted or filtered on by `/media`; the rule is never to
+ * widen this to "be complete". Deliberately absent, and why: `images`/`remotePoster`
+ * (stripped at fetch time by MEDIA_LIGHT_QUERY anyway), `overview`, `ratings`,
+ * `popularity`, `alternateTitles`, `cleanTitle`, `collection`, `movieFile`, `seasons`,
+ * `folder`, `originalLanguage` (an object nothing renders), `ended` (Sonarr's `status`
+ * already says it), and the release-date family.
+ */
 export const arrMediaSchema = z.object({
   id: z.number().int(),
   title: z.string(),
   sortTitle: z.string().optional(),
+  originalTitle: z.string().optional(),
   path: z.string().default(''),
   rootFolderPath: z.string().optional(),
   qualityProfileId: z.number().int().default(0),
@@ -104,8 +128,77 @@ export const arrMediaSchema = z.object({
    */
   hasFile: z.boolean().optional(),
   year: z.number().int().optional(),
+
+  // Identity across instances, and the links out. Radarr writes 0 for a manually added
+  // item with no metadata match, so 0 and absent have to mean the same thing.
+  tmdbId: z.number().int().optional(),
+  tvdbId: z.number().int().optional(),
+  imdbId: z.string().optional(),
+  titleSlug: z.string().optional(),
+
+  /** radarr: tba|announced|inCinemas|released|deleted - sonarr: continuing|ended|upcoming|deleted */
+  status: z.string().optional(),
+  /** Not `.default([])`: a default allocates an array per item on every cold index build. */
+  genres: z.array(z.string()).optional(),
+  certification: z.string().optional(),
+  runtime: z.number().optional(),
+  /** Radarr calls it a studio, Sonarr a network. One field to the filter. */
+  studio: z.string().optional(),
+  network: z.string().optional(),
+  added: z.string().optional(),
+  /** sonarr only */
+  seriesType: z.string().optional(),
+  /** radarr only */
+  minimumAvailability: z.string().optional(),
+  movieFileId: z.number().int().optional(),
+  statistics: arrMediaStatisticsSchema.optional(),
 });
 export type ArrMedia = z.infer<typeof arrMediaSchema>;
+
+/**
+ * What one import list currently holds, joined to the library by tmdbId.
+ *
+ * Radarr only: `GET /api/v3/importlist/movie`. Sonarr exposes no equivalent, which is why
+ * list membership there is unknown rather than empty. `lists` is a set of import list
+ * *ids* - per-instance, so names are resolved from that instance's own list snapshot.
+ */
+export const arrImportListMovieSchema = z.object({
+  tmdbId: z.number().int(),
+  lists: z.array(z.number().int()).default([]),
+  isExcluded: z.boolean().optional(),
+  isExisting: z.boolean().optional(),
+});
+export type ArrImportListMovie = z.infer<typeof arrImportListMovieSchema>;
+
+/**
+ * Size on disk, wherever this flavour keeps it.
+ *
+ * `null` means unknown, and it stays unknown all the way into the filter's three-valued
+ * logic. Never coerce it to 0: "we do not know" and "nothing there" are different answers.
+ */
+export function mediaSizeOnDisk(media: ArrMedia): number | null {
+  if (media.sizeOnDisk !== undefined) return media.sizeOnDisk;
+  return media.statistics?.sizeOnDisk ?? null;
+}
+
+/**
+ * Whether anything is on disk for this item.
+ *
+ * Radarr says so directly. Sonarr does not, so it is derived from the episode file count.
+ * `null` when neither source is present - unknown, deliberately not `false`.
+ */
+export function mediaHasFile(media: ArrMedia): boolean | null {
+  if (media.hasFile !== undefined) return media.hasFile;
+  const files = media.statistics?.episodeFileCount;
+  return files === undefined ? null : files > 0;
+}
+
+/** Sonarr's episode progress, or null for a movie (and for a series with no rollup). */
+export function mediaEpisodeCounts(media: ArrMedia): { have: number; total: number } | null {
+  const stats = media.statistics;
+  if (stats?.episodeCount === undefined) return null;
+  return { have: stats.episodeFileCount ?? 0, total: stats.episodeCount };
+}
 
 /** Body of an *Arr `POST /api/v3/command` acknowledgement. */
 export const arrCommandSchema = z.object({

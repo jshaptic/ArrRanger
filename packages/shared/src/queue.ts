@@ -9,10 +9,14 @@ export const ARR_OPS = [
   'tag.merge',
   'mediaTags.add',
   'mediaTags.remove',
+  'mediaTags.set',
   'rootFolder.create',
   'rootFolder.delete',
   'media.moveRootFolder',
   'media.refresh',
+  'media.setMonitored',
+  'media.setQualityProfile',
+  'media.delete',
   'importList.create',
   'importList.update',
   'importList.delete',
@@ -93,11 +97,31 @@ export interface QueueOpPayloads {
   'tag.merge': { sourceTagIds: number[]; targetTagId: number; deleteSources: boolean };
   'mediaTags.add': { mediaIds: number[]; tagIds: number[] };
   'mediaTags.remove': { mediaIds: number[]; tagIds: number[] };
+  /**
+   * The exact tag list, replacing whatever was there.
+   *
+   * Its own op rather than a mode on the two above, because it wipes tags nobody named -
+   * a different blast radius deserves its own name in the queue and its own row in the DB
+   * CHECK. And an empty list means "clear them all" here, which is precisely the case the
+   * add/remove guard exists to reject.
+   */
+  'mediaTags.set': { mediaIds: number[]; tagIds: number[] };
   'rootFolder.create': { path: string };
   'rootFolder.delete': { rootFolderId: number; path: string };
   'media.moveRootFolder': { mediaIds: number[]; toRootFolderPath: string; moveFiles: boolean };
   /** Rescan after the files underneath *Arr changed on disk. Empty = the whole library. */
   'media.refresh': { mediaIds: number[] };
+  'media.setMonitored': { mediaIds: number[]; monitored: boolean };
+  /** The id is resolved per instance from a profile *name*: ids do not travel. */
+  'media.setQualityProfile': { mediaIds: number[]; qualityProfileId: number; profileName: string };
+  /**
+   * Removes the items from the instance.
+   *
+   * `deleteFiles` is the irreversible one - the files leave the disk and ArrRanger cannot
+   * put them back. Without `addImportExclusion` the next list sync may re-add everything
+   * just removed, so both are explicit rather than defaulted.
+   */
+  'media.delete': { mediaIds: number[]; deleteFiles: boolean; addImportExclusion: boolean };
   'importList.create': { name: string; sourceInstanceId: number; sourceImportListId: number };
   'importList.update': { importListId: number; changes: ImportListChanges };
   'importList.delete': { importListId: number };
@@ -238,6 +262,7 @@ export const queuePayloadSchemas: QueuePayloadSchemas = {
   }),
   'mediaTags.add': z.object({ mediaIds: idList, tagIds: tagIdList }),
   'mediaTags.remove': z.object({ mediaIds: idList, tagIds: tagIdList }),
+  'mediaTags.set': z.object({ mediaIds: idList, tagIds: tagIdList }),
   'rootFolder.create': z.object({ path: z.string().min(1) }),
   'rootFolder.delete': z.object({
     rootFolderId: z.number().int().positive(),
@@ -265,6 +290,18 @@ export const queuePayloadSchemas: QueuePayloadSchemas = {
     enableAutomaticAdd: z.boolean(),
   }),
   'media.refresh': z.object({ mediaIds: z.array(z.number().int().positive()) }),
+  'media.setMonitored': z.object({ mediaIds: idList, monitored: z.boolean() }),
+  'media.setQualityProfile': z.object({
+    mediaIds: idList,
+    qualityProfileId: z.number().int().positive(),
+    profileName: z.string().min(1),
+  }),
+  'media.delete': z.object({
+    mediaIds: idList,
+    /** The irreversible one. */
+    deleteFiles: z.boolean(),
+    addImportExclusion: z.boolean(),
+  }),
   'fs.mkdir': z.object({ path: absolutePath, recursive: z.boolean() }),
   'fs.rename': z.object({ from: absolutePath, to: absolutePath }),
   'fs.move': z.object({ from: absolutePath, to: absolutePath }),
@@ -345,8 +382,12 @@ export function targetKindForOp(op: QueueOp, instanceKind: InstanceKind | null):
       return 'importList';
     case 'mediaTags.add':
     case 'mediaTags.remove':
+    case 'mediaTags.set':
     case 'media.moveRootFolder':
     case 'media.refresh':
+    case 'media.setMonitored':
+    case 'media.setQualityProfile':
+    case 'media.delete':
       // Only reachable for *Arr ops, which the queue always stages with an instance.
       return instanceKind === null ? 'movie' : MEDIA_KIND_BY_INSTANCE[instanceKind];
   }
@@ -371,6 +412,18 @@ export function summariseQueueOp(item: NewQueueItem): string {
       return item.payload.tagIds.length === 0
         ? `Remove the tag from step ${item.dependsOnId ?? '?'} from ${item.payload.mediaIds.length} item(s)`
         : `Remove ${item.payload.tagIds.length} tag(s) from ${item.payload.mediaIds.length} item(s)`;
+    case 'mediaTags.set':
+      return item.payload.tagIds.length === 0
+        ? `Clear all tags on ${String(item.payload.mediaIds.length)} item(s)`
+        : `Replace tags on ${String(item.payload.mediaIds.length)} item(s) with ${String(item.payload.tagIds.length)} tag(s)`;
+    case 'media.setMonitored':
+      return `${item.payload.monitored ? 'Monitor' : 'Unmonitor'} ${String(item.payload.mediaIds.length)} item(s)`;
+    case 'media.setQualityProfile':
+      return `Set quality profile "${item.payload.profileName}" on ${String(item.payload.mediaIds.length)} item(s)`;
+    case 'media.delete':
+      return `Delete ${String(item.payload.mediaIds.length)} item(s)${
+        item.payload.deleteFiles ? ' and their files from disk' : ', leaving the files on disk'
+      }${item.payload.addImportExclusion ? ', adding an import exclusion' : ''}`;
     case 'rootFolder.create':
       return `Add root folder ${item.payload.path}`;
     case 'rootFolder.delete':
@@ -409,16 +462,36 @@ function basename(value: string): string {
 
 /** How many remote objects an item touches - drives the "affected" column. */
 export function affectedCountForOp(item: NewQueueItem): number {
+  // Exhaustive on purpose, with no `default`. This used to fall through to 1, which meant a
+  // 3000-item delete would stage as "1 affected" - a silent lie in the one column the
+  // review step exists to show. Enumerating the ones that touch a single object costs a
+  // line each and makes the next op break the build instead.
   switch (item.op) {
     case 'mediaTags.add':
     case 'mediaTags.remove':
+    case 'mediaTags.set':
     case 'media.moveRootFolder':
+    case 'media.setMonitored':
+    case 'media.setQualityProfile':
+    case 'media.delete':
       return item.payload.mediaIds.length;
     case 'media.refresh':
       return Math.max(1, item.payload.mediaIds.length);
     case 'tag.merge':
       return item.payload.sourceTagIds.length;
-    default:
+    case 'tag.create':
+    case 'tag.rename':
+    case 'tag.delete':
+    case 'rootFolder.create':
+    case 'rootFolder.delete':
+    case 'importList.create':
+    case 'importList.update':
+    case 'importList.delete':
+    case 'importList.setEnabled':
+    case 'fs.mkdir':
+    case 'fs.rename':
+    case 'fs.move':
+    case 'fs.delete':
       return 1;
   }
 }
@@ -445,6 +518,16 @@ export function describeQueueTarget(item: NewQueueItem): QueueTargetDescription 
     case 'mediaTags.add':
     case 'mediaTags.remove':
       return { targetId: null, targetLabel: `${item.payload.mediaIds.length} item(s)` };
+    case 'mediaTags.set':
+    case 'media.setMonitored':
+    case 'media.setQualityProfile':
+    case 'media.delete':
+      return {
+        // A one-item operation is worth addressing in the drawer and the audit trail; a
+        // 137-title label is not, so the row stays a count and the view keeps the identity.
+        targetId: item.payload.mediaIds.length === 1 ? (item.payload.mediaIds[0] ?? null) : null,
+        targetLabel: `${item.payload.mediaIds.length} item(s)`,
+      };
     case 'rootFolder.create':
       return { targetId: null, targetLabel: item.payload.path };
     case 'rootFolder.delete':

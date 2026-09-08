@@ -5,3 +5,6 @@ export * from './filesystem.js';
 export * from './run.js';
 export * from './api.js';
 export * from './path-filter.js';
+export * from './media-identity.js';
+export * from './media-filter.js';
+export * from './media.js';

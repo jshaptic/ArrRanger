@@ -34,11 +34,18 @@ export const resourceRoutes: FastifyPluginAsync = async (app) => {
     return app.ctx.resources.getMedia(id, query);
   });
 
-  /** Drops the cached view so the next read hits the instance. */
+  /**
+   * Drops the cached view so the next read hits the instance.
+   *
+   * The joined views memoise on top of the snapshot cache, so dropping the snapshots alone
+   * would leave up to 30 seconds of the very staleness this endpoint exists to clear.
+   */
   app.post('/instances/:id/refresh', async (request, reply): Promise<void> => {
     const { id } = idParams.parse(request.params);
     app.ctx.instances.require(id);
     app.ctx.resources.invalidate(id);
+    app.ctx.pathIndex.invalidate();
+    app.ctx.mediaFleet.invalidate();
     reply.code(204);
   });
 };

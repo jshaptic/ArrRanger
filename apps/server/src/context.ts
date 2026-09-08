@@ -11,6 +11,7 @@ import { QueueRepository } from './repositories/queue.repo.js';
 import { RunsRepository } from './repositories/runs.repo.js';
 import { SnapshotsRepository } from './repositories/snapshots.repo.js';
 import { InstancesService } from './services/instances.service.js';
+import { MediaFleetService } from './services/media-fleet.service.js';
 import { PathIndexService } from './services/path-index.service.js';
 import { PathMatrixService } from './services/path-matrix.service.js';
 import { ResourcesService } from './services/resources.service.js';
@@ -29,6 +30,7 @@ export interface AppContext {
   readonly instances: InstancesService;
   readonly resources: ResourcesService;
   readonly filesystem: FilesystemService;
+  readonly mediaFleet: MediaFleetService;
   readonly pathIndex: PathIndexService;
   readonly pathMatrix: PathMatrixService;
   shutdown(): Promise<void>;
@@ -51,13 +53,26 @@ export async function createContext(params: {
   const guard = await PathGuard.create(config.fsRoots);
   const filesystem = new FilesystemService(guard);
 
-  const instances = new InstancesService({ instances: instancesRepo, snapshots, dispatchers });
   const resources = new ResourcesService({ instances: instancesRepo, snapshots, dispatchers });
+  const mediaFleet = new MediaFleetService({ instances: instancesRepo, resources });
   const pathIndex = new PathIndexService({ instances: instancesRepo, resources });
   const pathMatrix = new PathMatrixService({
     index: pathIndex,
     filesystem,
     lowSpace: { bytes: config.lowSpaceBytes, percent: config.lowSpacePercent },
+  });
+
+  // Declared after the joined views so it can drop their memos: adding, removing or
+  // re-pointing an instance changes which libraries they read, and a 30-second wait for
+  // that to show up reads as a bug in the view rather than in the cache.
+  const instances = new InstancesService({
+    instances: instancesRepo,
+    snapshots,
+    dispatchers,
+    onInstancesChanged: () => {
+      pathIndex.invalidate();
+      mediaFleet.invalidate();
+    },
   });
 
   // The safety guards ask *Arr what it still owns. The index answers from cached
@@ -74,9 +89,13 @@ export async function createContext(params: {
     events,
     logger,
     onFilesystemChanged: () => pathIndex.invalidate(),
-    // An *Arr change invalidates the joined view too - a root folder a run just
-    // created has to be visible in the next read, not 30 seconds later.
-    onInstanceChanged: () => pathIndex.invalidate(),
+    // An *Arr change invalidates every joined view - a root folder a run just created,
+    // or a tag it just attached, has to be visible in the next read rather than 30
+    // seconds later.
+    onInstanceChanged: () => {
+      pathIndex.invalidate();
+      mediaFleet.invalidate();
+    },
   });
 
   for (const root of filesystem.roots().roots) {
@@ -109,6 +128,7 @@ export async function createContext(params: {
     instances,
     resources,
     filesystem,
+    mediaFleet,
     pathIndex,
     pathMatrix,
     async shutdown() {

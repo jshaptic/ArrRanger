@@ -8,7 +8,20 @@ export type SnapshotResource =
   | 'rootFolder'
   | 'importList'
   | 'qualityProfile'
-  | 'media';
+  | 'media'
+  /**
+   * What Radarr's import lists currently hold, joined to the library on tmdbId.
+   *
+   * The one snapshot whose payload is a **projection** rather than the verbatim body:
+   * `/importlist/movie` carries poster URLs with no parameter to strip them, so it is
+   * reduced and filtered to library items before storing, which bounds it by library size
+   * however large the list. Safe because nothing is ever written back - the keep-raw rule
+   * is there so a PUT can round-trip via `mergeForPut`.
+   *
+   * Radarr only. Sonarr exposes no equivalent endpoint, so list membership there is
+   * unknown, deliberately not empty.
+   */
+  | 'importListMovie';
 
 export interface Snapshot<T> {
   readonly payload: T;

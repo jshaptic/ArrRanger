@@ -39,12 +39,6 @@ export interface ResourceSnapshotResponse {
   readonly qualityProfiles: readonly ArrQualityProfile[];
 }
 
-export interface MediaListResponse {
-  readonly instanceId: number;
-  readonly fetchedAt: string;
-  readonly media: readonly ArrMedia[];
-}
-
 export interface QueueListResponse {
   readonly items: readonly QueueItem[];
   readonly activeRun: QueueRun | null;

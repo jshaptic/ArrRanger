@@ -1,10 +1,12 @@
 import {
+  arrImportListMovieSchema,
   arrImportListSchema,
   arrMediaSchema,
   arrQualityProfileSchema,
   arrRootFolderSchema,
   arrTagDetailSchema,
   type ArrImportList,
+  type ArrImportListMovie,
   type ArrJson,
   type ArrMedia,
   type ArrQualityProfile,
@@ -17,7 +19,17 @@ import {
 import { ArrClient, pageMedia, type MediaQuery } from '../arr/client.js';
 import type { ArrDispatcherPool } from '../arr/http.js';
 import type { InstancesRepository } from '../repositories/instances.repo.js';
+import { ValidationError } from '../lib/errors.js';
 import type { SnapshotResource, SnapshotsRepository } from '../repositories/snapshots.repo.js';
+
+/**
+ * Runaway guard on one instance's import-list contents.
+ *
+ * The projection is already bounded by library size, so reaching this means something is
+ * very wrong. Exceeding it makes the whole resource unknown rather than a silent partial:
+ * half a list looks exactly like a list that does not contain something.
+ */
+export const MAX_IMPORT_LIST_ITEMS = 20_000;
 
 export interface ResourcesServiceDeps {
   readonly instances: InstancesRepository;
@@ -211,6 +223,74 @@ export class ResourcesService {
       (raw) => arrImportListSchema.parse(raw),
     );
     return lists.payload;
+  }
+
+  /** Cached tag details only - `/media` joins per-instance tag ids to their labels. */
+  async tagDetails(instanceId: number, refresh = false): Promise<readonly ArrTagDetail[]> {
+    const instance = this.deps.instances.requireWithKey(instanceId);
+    const tags = await this.cached<ArrTagDetail>(
+      instance,
+      'tagDetail',
+      refresh,
+      async (client) => (await client.listTagDetails()).map((entry) => entry.raw),
+      (raw) => arrTagDetailSchema.parse(raw),
+    );
+    return tags.payload;
+  }
+
+  /** Cached quality profiles only - ids are per-instance, so only the name travels. */
+  async qualityProfiles(instanceId: number, refresh = false): Promise<readonly ArrQualityProfile[]> {
+    const instance = this.deps.instances.requireWithKey(instanceId);
+    const profiles = await this.cached<ArrQualityProfile>(
+      instance,
+      'qualityProfile',
+      refresh,
+      async (client) => (await client.listQualityProfiles()).map((entry) => entry.raw),
+      (raw) => arrQualityProfileSchema.parse(raw),
+    );
+    return profiles.payload;
+  }
+
+  /**
+   * What Radarr's import lists hold, reduced before it is stored.
+   *
+   * The single place in this service that does not keep the raw body, and the reason is
+   * specific: `/importlist/movie` carries a poster URL per entry with no parameter to strip
+   * them, and a large Trakt list is thousands of entries. Only items already in the library
+   * can be joined to a row, so filtering to those first bounds the payload by library size
+   * whatever the list does - and nothing is ever PUT back, which is the only reason the
+   * keep-raw rule exists.
+   *
+   * Radarr only; the caller must not ask a Sonarr instance.
+   */
+  async importListMovies(
+    instanceId: number,
+    refresh = false,
+  ): Promise<readonly ArrImportListMovie[]> {
+    const instance = this.deps.instances.requireWithKey(instanceId);
+    const items = await this.cached<ArrImportListMovie>(
+      instance,
+      'importListMovie',
+      refresh,
+      async (client) => {
+        const all = await client.listImportListMovies();
+        const projected: ArrJson[] = all
+          .filter((entry) => entry.view.isExisting === true)
+          .map((entry) => ({
+            tmdbId: entry.view.tmdbId,
+            lists: [...entry.view.lists],
+            isExcluded: entry.view.isExcluded ?? false,
+          }));
+        if (projected.length > MAX_IMPORT_LIST_ITEMS) {
+          throw new ValidationError(
+            `${instance.name} reported more than ${String(MAX_IMPORT_LIST_ITEMS)} import list items`,
+          );
+        }
+        return projected;
+      },
+      (raw) => arrImportListMovieSchema.parse(raw),
+    );
+    return items.payload;
   }
 
   invalidate(instanceId: number): void {

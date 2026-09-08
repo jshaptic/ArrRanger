@@ -4,11 +4,40 @@ A mass-editing and staging tool for Radarr and Sonarr, in the spirit of a partit
 manager: you make all your edits against a snapshot, review them as a batch, and only
 then commit them to the live instances.
 
-Connect one or more Radarr/Sonarr instances, browse their tags, root folders and
-import lists, and stage changes - renames, merges, deletions, bulk root-folder moves.
-Nothing is sent to an *Arr instance until you press **Apply All**, which executes the
-queue sequentially with a progress bar and pauses on the first failure so you are never
-left half-applied.
+Connect one or more Radarr/Sonarr instances, browse their tags, root folders, import lists
+and media, and stage changes - renames, merges, deletions, bulk root-folder moves, bulk
+tagging and bulk deletes. Nothing is sent to an *Arr instance until you press **Apply All**,
+which executes the queue sequentially with a progress bar and pauses on the first failure so
+you are never left half-applied.
+
+Five views, four of them fleet-wide:
+
+| View | What it is for |
+|---|---|
+| **Tag parity** (`/tags`) | Every tag against every instance, as a grid. Create, rename, merge and delete across the fleet. |
+| **Paths** (`/paths`) | Root folders and what is actually on disk, joined into one tree. Re-map, reconcile and create folders. |
+| **Import lists** (`/import-lists`) | Every list and which instances have it. Copy one onto another instance, enable or disable in bulk. |
+| **Media** (`/media`) | Every movie and series across the fleet, one row per title. A filter language with and/or over any field - including which import list a title came from - and bulk tagging, root-folder moves, profile changes, monitoring and deletion. |
+| **Queue** (`/queue`) | Everything staged, in the order it will run, with the full *Arr exchange for each item after it has. |
+
+### The media filter
+
+`/media` has its own expression language, shared between the server and the browser so both
+reach the same verdict:
+
+```
+tags:4k year<2000 NOT list:"Trakt watchlist"    # and/or across fields; a space means AND
+instances>1                                     # every title the fleet holds twice
+instance:radarr-4k NOT any(instance:radarr-hd)  # on 4K, absent from HD
+all(monitored:false) added>-30d                 # added recently, monitored nowhere
+status:released hasFile:false monitored:true    # why has this not downloaded?
+size>20GB  root:/data/media/4k  tags:{4k,hdr}   # sizes, paths, brace-expanded values
+```
+
+Filtering, grouping and counting all happen server-side, so the summary above the table can
+never describe rows it has already removed. One thing it will not do is guess: Sonarr exposes
+no import-list contents endpoint, so `list:` cannot be answered for a series - those titles
+are counted and explained rather than quietly reported as matching nothing.
 
 ## Requirements
 
