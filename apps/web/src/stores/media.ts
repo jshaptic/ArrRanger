@@ -94,7 +94,6 @@ export const useMediaStore = defineStore('media', () => {
   const allMatching = ref<MediaIdsResponse | null>(null);
 
   const loading = ref(false);
-  const loadingMore = ref(false);
   const loadedOnce = ref(false);
 
   /**
@@ -106,20 +105,29 @@ export const useMediaStore = defineStore('media', () => {
    */
   const parsedFilter = computed(() => parseMediaFilter(filter.value));
 
-  const busy = computed(() => loading.value || loadingMore.value);
+  const listedCount = computed(() =>
+    undecided.value === 'show' ? counts.value.undecided : counts.value.matched,
+  );
+
+  const totalPages = computed(() => Math.max(1, Math.ceil(listedCount.value / PAGE_SIZE)));
 
   const selectedRows = computed(() =>
-    rows.value.filter((row) => selectedKeys.value.includes(row.key)),
+    allMatching.value !== null
+      ? rows.value
+      : rows.value.filter((row) => selectedKeys.value.includes(row.key)),
   );
 
-  const allLoadedSelected = computed(
-    () => rows.value.length > 0 && selectedRows.value.length === rows.value.length,
-  );
-  const someLoadedSelected = computed(
-    () => !allLoadedSelected.value && selectedRows.value.length > 0,
+  /** The header checkbox: on only for the whole match, never "every row on this page". */
+  const allMatchingSelected = computed(() => allMatching.value !== null);
+
+  /** Hand-picked rows on this page, so the header can sit in the middle state. */
+  const somePageSelected = computed(
+    () => allMatching.value === null && selectedKeys.value.length > 0,
   );
 
-  const hasMore = computed(() => truncated.value);
+  const selectedTitleCount = computed(() =>
+    allMatching.value !== null ? allMatching.value.matched : selectedKeys.value.length,
+  );
 
   const unreachableColumns = computed(() => columns.value.filter((column) => !column.reachable));
 
@@ -135,9 +143,12 @@ export const useMediaStore = defineStore('media', () => {
   const columnFor = (instanceId: number): MediaFleetColumn | undefined =>
     columns.value.find((column) => column.instanceId === instanceId);
 
+  function isRowSelected(key: string): boolean {
+    return allMatching.value !== null || selectedKeys.value.includes(key);
+  }
+
   async function request(next: { page: number; refresh?: boolean }): Promise<void> {
-    const flag = next.page === 1 ? loading : loadingMore;
-    flag.value = true;
+    loading.value = true;
     try {
       const response = await mediaApi.list({
         // An unreadable filter is never sent; `setFilter` refuses earlier, and this is the
@@ -153,7 +164,7 @@ export const useMediaStore = defineStore('media', () => {
         ...(next.refresh === true ? { refresh: true } : {}),
       });
 
-      rows.value = next.page === 1 ? response.rows : [...rows.value, ...response.rows];
+      rows.value = response.rows;
       columns.value = response.columns;
       totals.value = response.totals;
       vocabulary.value = response.vocabulary;
@@ -170,7 +181,7 @@ export const useMediaStore = defineStore('media', () => {
       // server disagreement worth reading rather than a reason to clear everything.
       ui.notify('error', `Could not read the fleet: ${messageOf(caught)}`);
     } finally {
-      flag.value = false;
+      loading.value = false;
     }
   }
 
@@ -178,9 +189,13 @@ export const useMediaStore = defineStore('media', () => {
     return request({ page: 1, ...(options.refresh === true ? { refresh: true } : {}) });
   }
 
-  function loadMore(): Promise<void> {
-    // Same predicate, more rows - so the selection survives.
-    return request({ page: page.value + 1 });
+  async function goToPage(next: number): Promise<void> {
+    const clamped = Math.min(totalPages.value, Math.max(1, next));
+    if (clamped === page.value) return;
+    const keepMatch = allMatching.value !== null;
+    await request({ page: clamped });
+    // A hand-picked page cannot describe copies the table no longer holds.
+    if (!keepMatch) selectedKeys.value = [];
   }
 
   function clearSelection(): void {
@@ -209,24 +224,24 @@ export const useMediaStore = defineStore('media', () => {
   }
 
   async function setSort(next: MediaSort, nextDirection?: MediaSortDirection): Promise<void> {
-    // Same rows in a new order, so the selection is still about rows that exist.
+    // The match set is about the filter, not the order. A hand-picked page is not.
     sort.value = next;
     direction.value =
       nextDirection ?? (sort.value === next && direction.value === 'asc' ? 'desc' : 'asc');
+    if (allMatching.value === null) selectedKeys.value = [];
     await load();
   }
 
   function toggleRow(key: string): void {
+    if (allMatching.value !== null) {
+      // Leaving the whole match: keep the rest of this page, drop this row.
+      allMatching.value = null;
+      selectedKeys.value = rows.value.map((row) => row.key).filter((entry) => entry !== key);
+      return;
+    }
     selectedKeys.value = selectedKeys.value.includes(key)
       ? selectedKeys.value.filter((entry) => entry !== key)
       : [...selectedKeys.value, key];
-    // An explicit row pick replaces a "everything matching" pick: the two would disagree.
-    allMatching.value = null;
-  }
-
-  function toggleAllLoaded(): void {
-    selectedKeys.value = allLoadedSelected.value ? [] : rows.value.map((row) => row.key);
-    allMatching.value = null;
   }
 
   /** Every id the current filter matches, from the server - never from the loaded page. */
@@ -241,6 +256,15 @@ export const useMediaStore = defineStore('media', () => {
     } catch (caught) {
       ui.notify('error', `Could not read the whole match: ${messageOf(caught)}`);
     }
+  }
+
+  /** The header checkbox: the whole match, or nothing. */
+  async function toggleAllMatching(): Promise<void> {
+    if (allMatching.value !== null) {
+      clearSelection();
+      return;
+    }
+    await selectAllMatching();
   }
 
   /** True while the server could only hand back part of the match. */
@@ -279,17 +303,29 @@ export const useMediaStore = defineStore('media', () => {
    * Selected copies on instances that are targeted but silent.
    *
    * Exactly what `targetsFor` left out, so the toolbar can say it out loud: unknown is not
-   * "nothing to do".
+   * "nothing to do". `/media/ids` omits the silent, so a whole-match still walks the page
+   * for copies the id set never named.
    */
   function skippedFor(instanceIds: readonly number[]): Array<{ name: string; items: number }> {
     const targeted = new Set(instanceIds);
     const skipped = new Map<number, number>();
 
+    if (allMatching.value !== null) {
+      for (const group of allMatching.value.groups) {
+        if (!targeted.has(group.instanceId)) continue;
+        if (reachableIds.value.has(group.instanceId)) continue;
+        skipped.set(group.instanceId, group.mediaIds.length);
+      }
+    }
+
+    // `/media/ids` never names a silent instance, so the page still has to speak for it.
+    const named = new Set(skipped.keys());
     for (const row of selectedRows.value) {
       for (const facet of row.facets) {
         if (!facet.matched) continue;
         if (!targeted.has(facet.instanceId)) continue;
         if (reachableIds.value.has(facet.instanceId)) continue;
+        if (named.has(facet.instanceId)) continue;
         skipped.set(facet.instanceId, (skipped.get(facet.instanceId) ?? 0) + 1);
       }
     }
@@ -304,13 +340,16 @@ export const useMediaStore = defineStore('media', () => {
    * The counts the toolbar prints.
    *
    * Read off the response, never off `rows.length`: the whole point of filtering on the
-   * server is that "showing 100 of 3 412" stays true.
+   * server is that "page 1 of 35" stays true.
    */
   const summary = computed(() => ({
     loaded: rows.value.length,
     matched: counts.value.matched,
+    listed: listedCount.value,
     undecided: counts.value.undecided,
     total: counts.value.total,
+    page: page.value,
+    totalPages: totalPages.value,
     truncated: truncated.value,
   }));
 
@@ -329,29 +368,30 @@ export const useMediaStore = defineStore('media', () => {
     sort,
     direction,
     page,
+    totalPages,
     truncated,
     selectedKeys,
     selectedRows,
-    allLoadedSelected,
-    someLoadedSelected,
+    selectedTitleCount,
+    allMatchingSelected,
+    somePageSelected,
     allMatching,
     selectionTruncated,
-    hasMore,
     unreachableColumns,
     listUnknownColumns,
     loading,
-    loadingMore,
     loadedOnce,
-    busy,
+    busy: loading,
     summary,
     columnFor,
+    isRowSelected,
     load,
-    loadMore,
+    goToPage,
     setFilter,
     setUndecided,
     setSort,
     toggleRow,
-    toggleAllLoaded,
+    toggleAllMatching,
     clearSelection,
     selectAllMatching,
     targetsFor,

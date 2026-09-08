@@ -179,31 +179,49 @@ describe('the media store', () => {
     await store.load();
 
     expect(store.rows).toHaveLength(2);
-    expect(store.summary).toMatchObject({ loaded: 2, matched: 900, undecided: 4, truncated: true });
+    expect(store.summary).toMatchObject({
+      loaded: 2,
+      matched: 900,
+      listed: 900,
+      undecided: 4,
+      page: 1,
+      totalPages: 9,
+      truncated: true,
+    });
   });
 
-  it('appends a further page and keeps the counts', async () => {
+  it('replaces the page rather than appending, and keeps the counts', async () => {
     const store = useMediaStore();
     await store.load();
     response = fleet([row('c', [{ instanceId: 1, mediaId: 33, matched: true }])], { page: 2 });
-    await store.loadMore();
+    await store.goToPage(2);
 
-    expect(store.rows.map((entry) => entry.key)).toEqual(['a', 'b', 'c']);
+    expect(store.rows.map((entry) => entry.key)).toEqual(['c']);
     expect(store.summary.matched).toBe(900);
+    expect(store.page).toBe(2);
     expect(calls.at(-1)).toMatchObject({ page: 2 });
   });
 
-  it('clears the selection on a filter change, and keeps it across a page', async () => {
+  it('clears a hand-picked page on navigation, and keeps a whole match', async () => {
     const store = useMediaStore();
     await store.load();
-    store.toggleAllLoaded();
-    expect(store.selectedKeys).toHaveLength(2);
+    store.toggleRow('a');
+    expect(store.selectedKeys).toEqual(['a']);
 
-    await store.loadMore();
-    expect(store.selectedKeys).toHaveLength(2);
-
-    await store.setFilter('tags:kids');
+    response = fleet([row('c', [{ instanceId: 1, mediaId: 33, matched: true }])], { page: 2 });
+    await store.goToPage(2);
     expect(store.selectedKeys).toHaveLength(0);
+    expect(store.allMatching).toBeNull();
+
+    response = fleet([row('a', [{ instanceId: 1, mediaId: 11, matched: true }])], { page: 1 });
+    await store.goToPage(1);
+    await store.selectAllMatching();
+    expect(store.allMatching).not.toBeNull();
+
+    response = fleet([row('c', [{ instanceId: 1, mediaId: 33, matched: true }])], { page: 2 });
+    await store.goToPage(2);
+    expect(store.allMatching).not.toBeNull();
+    expect(store.isRowSelected('c')).toBe(true);
   });
 
   it('drops the whole-match selection when the filter that defined it changes', async () => {
@@ -221,17 +239,19 @@ describe('the media store', () => {
     await store.load();
     await store.setFilter('tags:kids');
     calls.length = 0;
-    await store.selectAllMatching();
+    await store.toggleAllMatching();
 
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ filter: 'tags:kids' });
+    expect(store.selectedTitleCount).toBe(900);
     expect(store.targetsFor([1, 2])).toEqual([{ instanceId: 1, mediaIds: [11, 13, 14] }]);
   });
 
   it('targets only the copies that matched, grouped one operation per instance', async () => {
     const store = useMediaStore();
     await store.load();
-    store.toggleAllLoaded();
+    store.toggleRow('a');
+    store.toggleRow('b');
 
     // row b has a copy on instance 1 that did not match - it must not be acted on
     expect(store.targetsFor([1, 2])).toEqual([
@@ -251,7 +271,8 @@ describe('the media store', () => {
 
     const store = useMediaStore();
     await store.load();
-    store.toggleAllLoaded();
+    store.toggleRow('a');
+    store.toggleRow('b');
 
     // instance 2 is targeted but silent: no operation, and the count is available to state
     expect(store.targetsFor([1, 2])).toEqual([{ instanceId: 1, mediaIds: [11] }]);
@@ -260,6 +281,28 @@ describe('the media store', () => {
     // instance 1 untargeted: dropped too, but that is a choice rather than an unknown
     expect(store.targetsFor([2])).toEqual([]);
     expect(store.skippedFor([2])).toEqual([{ name: 'B', items: 1 }]);
+  });
+
+  it('counts a silent instance from the id set, not only the loaded page', async () => {
+    response = fleet(
+      [row('a', [{ instanceId: 1, mediaId: 11, matched: true }])],
+      { columns: [column(1, 'A'), column(2, 'B', false)] },
+    );
+    ids = {
+      matched: 2,
+      truncated: false,
+      groups: [
+        { instanceId: 1, kind: 'radarr', mediaIds: [11] },
+        { instanceId: 2, kind: 'radarr', mediaIds: [22, 23] },
+      ],
+    };
+
+    const store = useMediaStore();
+    await store.load();
+    await store.selectAllMatching();
+
+    expect(store.targetsFor([1, 2])).toEqual([{ instanceId: 1, mediaIds: [11] }]);
+    expect(store.skippedFor([1, 2])).toEqual([{ name: 'B', items: 2 }]);
   });
 
   it('keeps the rows on screen when a request fails', async () => {

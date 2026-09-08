@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import type { MediaRow } from '@arrranger/shared';
 import BaseButton from '@/components/base/BaseButton.vue';
 import BaseCheckbox from '@/components/base/BaseCheckbox.vue';
+import BasePagination from '@/components/base/BasePagination.vue';
 import EmptyState from '@/components/base/EmptyState.vue';
 import IconInstance from '@/components/base/icons/IconInstance.vue';
 import IconSearch from '@/components/base/icons/IconSearch.vue';
@@ -182,8 +183,8 @@ onMounted(() => {
     <template v-else>
       <!-- The toolbar. Reversible work is a button; the irreversible kind opens a dialog. -->
       <div class="flex flex-wrap items-center gap-2">
-        <span v-if="selectedItems > 0" class="text-xs text-staged" data-testid="summary">
-          {{ media.selectedRows.length }} title(s) · {{ selectedItems }} item(s) across
+        <span v-if="selectedItems > 0 || media.selectedTitleCount > 0" class="text-xs text-staged" data-testid="summary">
+          {{ media.selectedTitleCount }} title(s) · {{ selectedItems }} cop(ies) across
           {{ targets.length }} instance(s)
           <BaseButton size="sm" variant="ghost" @click="media.clearSelection()">clear</BaseButton>
         </span>
@@ -253,10 +254,10 @@ onMounted(() => {
                 >
                   <label class="flex items-center gap-2 text-[11px] font-semibold text-muted">
                     <BaseCheckbox
-                      :model-value="media.allLoadedSelected"
-                      :indeterminate="media.someLoadedSelected"
+                      :model-value="media.allMatchingSelected"
+                      :indeterminate="media.somePageSelected"
                       data-testid="select-all"
-                      @change="media.toggleAllLoaded()"
+                      @change="media.toggleAllMatching()"
                     />
                     Title ({{ media.counts.matched }})
                   </label>
@@ -276,16 +277,16 @@ onMounted(() => {
               <tr
                 v-for="row in media.rows"
                 :key="row.key"
-                :class="media.selectedKeys.includes(row.key) ? 'bg-accent/5' : 'hover:bg-raised/40'"
+                :class="media.isRowSelected(row.key) ? 'bg-accent/5' : 'hover:bg-raised/40'"
               >
                 <th
                   scope="row"
                   class="sticky left-0 z-10 border-b border-line px-3 py-1.5 text-left font-normal"
-                  :class="media.selectedKeys.includes(row.key) ? 'bg-[#16202b]' : 'bg-surface'"
+                  :class="media.isRowSelected(row.key) ? 'bg-[#16202b]' : 'bg-surface'"
                 >
                   <label class="flex items-center gap-2">
                     <BaseCheckbox
-                      :model-value="media.selectedKeys.includes(row.key)"
+                      :model-value="media.isRowSelected(row.key)"
                       @change="media.toggleRow(row.key)"
                     />
                     <component
@@ -388,27 +389,16 @@ onMounted(() => {
              filtering server-side. -->
         <div class="flex flex-wrap items-center gap-2 text-[11px] text-muted">
           <span data-testid="listing-summary">
-            showing {{ media.summary.loaded }} of {{ media.summary.matched }} matching title(s)
+            Page {{ media.summary.page }} of {{ media.summary.totalPages }} · {{ media.summary.listed }}
+            {{ media.undecided === 'show' ? 'undecided' : 'matching' }} title(s)
           </span>
-          <BaseButton
-            v-if="media.hasMore"
-            size="sm"
-            variant="ghost"
-            :loading="media.loadingMore"
-            data-testid="load-more"
-            @click="media.loadMore()"
-          >
-            Load more
-          </BaseButton>
-          <BaseButton
-            v-if="media.hasMore"
-            size="sm"
-            variant="ghost"
-            data-testid="select-all-matching"
-            @click="media.selectAllMatching()"
-          >
-            select all matching
-          </BaseButton>
+          <BasePagination
+            v-if="media.summary.totalPages > 1"
+            :page="media.page"
+            :total-pages="media.totalPages"
+            :loading="media.loading"
+            @page="media.goToPage($event)"
+          />
           <BaseButton
             size="sm"
             variant="ghost"

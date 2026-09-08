@@ -229,7 +229,11 @@ const listMedia = vi.fn(
         importListsUnknownInstances: COLUMNS.filter((entry) => !entry.importListsKnown).length,
         weakIdentityRows: 0,
       },
-      counts: { matched: ROWS.length, undecided: UNDECIDED, total: ROWS.length + UNDECIDED },
+      counts: {
+        matched: TRUNCATED ? 250 : ROWS.length,
+        undecided: UNDECIDED,
+        total: (TRUNCATED ? 250 : ROWS.length) + UNDECIDED,
+      },
       undecidedReasons:
         UNDECIDED > 0
           ? [{ reason: 'import-list membership is not answerable on Sonarr', rows: UNDECIDED }]
@@ -252,13 +256,26 @@ const listMedia = vi.fn(
     }),
 );
 
-const idsMedia = vi.fn(() =>
-  Promise.resolve({
-    matched: 900,
+function idsFromRows() {
+  const groups = new Map<number, { kind: MediaFacet['kind']; mediaIds: number[] }>();
+  for (const entry of ROWS) {
+    for (const facet of entry.facets) {
+      if (!facet.matched) continue;
+      const column = COLUMNS.find((item) => item.instanceId === facet.instanceId);
+      if (column !== undefined && !column.reachable) continue;
+      const group = groups.get(facet.instanceId) ?? { kind: facet.kind, mediaIds: [] };
+      group.mediaIds.push(facet.mediaId);
+      groups.set(facet.instanceId, group);
+    }
+  }
+  return {
+    matched: TRUNCATED ? 900 : ROWS.length,
     truncated: IDS_TRUNCATED,
-    groups: [{ instanceId: 2, kind: 'radarr' as const, mediaIds: [77, 78, 79] }],
-  }),
-);
+    groups: [...groups].map(([instanceId, group]) => ({ instanceId, ...group })),
+  };
+}
+
+const idsMedia = vi.fn(() => Promise.resolve(idsFromRows()));
 
 vi.mock('@/api/media', () => ({
   mediaApi: { list: () => listMedia(), ids: () => idsMedia() },
@@ -360,7 +377,8 @@ beforeEach(() => {
   IDS_TRUNCATED = false;
   push.mockClear();
   listMedia.mockClear();
-  idsMedia.mockClear();
+  idsMedia.mockReset();
+  idsMedia.mockImplementation(() => Promise.resolve(idsFromRows()));
   document.body.innerHTML = '';
 });
 
@@ -533,14 +551,14 @@ describe('MediaFleetView', () => {
     expect(batch.map((item) => item.instanceId)).not.toContain(2);
   });
 
-  it('select-all is tri-state and the summary counts titles and items apart', async () => {
+  it('select-all is tri-state and the summary counts titles and copies apart', async () => {
     const wrapper = await mountView();
     await wrapper.find('[data-testid="select-all"]').setValue(true);
     await flushPromises();
 
     const summary = wrapper.find('[data-testid="summary"]').text();
     expect(summary).toContain('3 title(s)');
-    expect(summary).toContain('3 item(s)');
+    expect(summary).toContain('3 cop(ies)');
     expect(summary).toContain('3 instance(s)');
   });
 
@@ -604,13 +622,23 @@ describe('MediaFleetView', () => {
 
   it('asks the server for the whole match rather than reusing the page', async () => {
     TRUNCATED = true;
+    idsMedia.mockResolvedValue({
+      matched: 900,
+      truncated: false,
+      groups: [{ instanceId: 2, kind: 'radarr', mediaIds: [77, 78, 79] }],
+    });
     const wrapper = await mountView();
 
-    await wrapper.find('[data-testid="select-all-matching"]').trigger('click');
+    await wrapper.find('[data-testid="select-all"]').setValue(true);
     await flushPromises();
-    expect(idsMedia).toHaveBeenCalledTimes(1);
+    expect(idsMedia).toHaveBeenCalled();
 
-    await selectAllAnd(wrapper, 'Monitor');
+    const summary = wrapper.find('[data-testid="summary"]').text();
+    expect(summary).toContain('900 title(s)');
+    expect(summary).toContain('3 cop(ies)');
+
+    await wrapper.findAll('button').find((entry) => entry.text().trim() === 'Monitor')?.trigger('click');
+    await flushPromises();
     const batch = push.mock.calls[0]?.[0] ?? [];
     // the server's ids, not the loaded rows'
     expect(batch).toHaveLength(1);
@@ -622,7 +650,7 @@ describe('MediaFleetView', () => {
     IDS_TRUNCATED = true;
     const wrapper = await mountView();
 
-    await wrapper.find('[data-testid="select-all-matching"]').trigger('click');
+    await wrapper.find('[data-testid="select-all"]').setValue(true);
     await flushPromises();
 
     expect(wrapper.find('[data-testid="selection-truncated"]').text()).toContain(
@@ -635,10 +663,11 @@ describe('MediaFleetView', () => {
   it('reports the matched count, not the number of rows on screen', async () => {
     TRUNCATED = true;
     const wrapper = await mountView();
-    expect(wrapper.find('[data-testid="listing-summary"]').text()).toBe(
-      'showing 3 of 3 matching title(s)',
+    expect(wrapper.find('[data-testid="listing-summary"]').text()).toMatch(
+      /Page 1 of 3 ·\s*250 matching title\(s\)/,
     );
-    expect(wrapper.find('[data-testid="load-more"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="pagination"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="load-more"]').exists()).toBe(false);
   });
 
   it('opens one copy\'s full breakdown from its chip, and says what it cannot know', async () => {

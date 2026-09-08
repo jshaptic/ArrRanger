@@ -121,7 +121,8 @@ than in a column. A low-space warning only ever lands on a mount or a root folde
   `title`-basis row is a guess and says so. One line each: kind, links and size have columns.
 - **No row actions.** A bulk operation acts on the **matching** facets only - so
   `monitored:false instance:radarr-4k` then delete cannot touch Radarr-HD - while every chip
-  still renders. Targets come from `GET /media/ids`, never the loaded page.
+  still renders. The list pages; the header checkbox selects the whole match via
+  `GET /media/ids`, never the loaded page.
 - **A filter verdict has three values.** Sonarr exposes no `importlist/series`, so `list:X`
   and `NOT list:X` are both unanswerable there. Deliberately **no boolean helper** collapses
   it; undecided rows are counted with their reason, never mixed in with the non-matches.
