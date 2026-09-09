@@ -4,7 +4,7 @@ import {
   type ConnectionTestResult,
   type InstanceListResponse,
   type InstanceResponse,
-} from '@arrranger/shared';
+} from '@fleetarr/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 

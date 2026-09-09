@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted } from 'vue';
-import type { MediaFacet, MediaRow } from '@arrranger/shared';
+import type { MediaFacet, MediaRow } from '@fleetarr/shared';
 import BaseInstanceBadge from '@/components/base/BaseInstanceBadge.vue';
 import IconClose from '@/components/base/icons/IconClose.vue';
 import IconUnknown from '@/components/base/icons/IconUnknown.vue';

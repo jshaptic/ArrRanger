@@ -1,4 +1,4 @@
-import type { Instance } from '@arrranger/shared';
+import type { Instance } from '@fleetarr/shared';
 import type { ImportListRow, InstanceSnapshot } from './matrix';
 
 /**

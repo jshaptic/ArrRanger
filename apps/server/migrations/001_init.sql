@@ -1,4 +1,4 @@
--- ArrRanger schema v1
+-- Fleetarr schema v1
 -- Connection pragmas (WAL, foreign_keys, busy_timeout) live in db/client.ts:
 -- they are per-connection and would be a no-op inside this transaction.
 

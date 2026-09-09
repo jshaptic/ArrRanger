@@ -34,7 +34,7 @@ const media = useMediaStore();
 const queue = useQueueStore();
 const paths = usePathsStore();
 
-const title = computed(() => route.meta.title ?? 'ArrRanger');
+const title = computed(() => route.meta.title ?? 'Fleetarr');
 const hint = computed(() => route.meta.hint ?? '');
 
 onMounted(async () => {
@@ -60,7 +60,7 @@ watch(
   <div class="flex h-full flex-col">
     <header class="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-5 py-3">
       <div class="flex items-baseline gap-2.5">
-        <span class="text-base font-semibold tracking-tight text-ink">ArrRanger</span>
+        <span class="text-base font-semibold tracking-tight text-ink">Fleetarr</span>
         <span class="text-faint" aria-hidden="true">/</span>
         <h1 class="text-base font-semibold text-ink">{{ title }}</h1>
         <span v-if="hint" class="hidden text-[11px] text-muted sm:inline">{{ hint }}</span>

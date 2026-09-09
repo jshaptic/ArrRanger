@@ -1,4 +1,4 @@
--- ArrRanger schema v4: cache what Radarr's import lists currently hold.
+-- Fleetarr schema v4: cache what Radarr's import lists currently hold.
 --
 -- `/media` answers "which list did this come from" by joining the library to
 -- GET /api/v3/importlist/movie on tmdbId. Sonarr has no equivalent endpoint, so that

@@ -1,7 +1,7 @@
 @import 'tailwindcss';
 
 /**
- * ArrRanger is a dark-only tool by design - it lives next to Radarr/Sonarr/Unraid.
+ * Fleetarr is a dark-only tool by design - it lives next to Radarr/Sonarr/Unraid.
  * The semantic colours below are the whole visual language of the fleet views:
  * in-sync, missing, drifted, staged, failed. Nothing else should carry meaning.
  */

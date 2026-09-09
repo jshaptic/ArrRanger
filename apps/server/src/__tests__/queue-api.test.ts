@@ -11,7 +11,7 @@ import type {
   QueueListResponse,
   ResourceSnapshotResponse,
   RunResponse,
-} from '@arrranger/shared';
+} from '@fleetarr/shared';
 import { startFakeArr, serverApiKey, type FakeArrServer } from './fake-arr.js';
 import {
   api,

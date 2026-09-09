@@ -1,4 +1,4 @@
-import type { Instance, QueueItem, QueueRun } from '@arrranger/shared';
+import type { Instance, QueueItem, QueueRun } from '@fleetarr/shared';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';

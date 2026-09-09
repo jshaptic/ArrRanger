@@ -1,4 +1,4 @@
--- ArrRanger schema v3: importList.create clones a list onto another instance.
+-- Fleetarr schema v3: importList.create clones a list onto another instance.
 --
 -- SQLite cannot edit a CHECK constraint, so queue_items is rebuilt. The migration
 -- runner disables foreign keys around this file so dropping the old table does not

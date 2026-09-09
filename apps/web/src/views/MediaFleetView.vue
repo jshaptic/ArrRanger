@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import type { MediaRow } from '@arrranger/shared';
+import type { MediaRow } from '@fleetarr/shared';
 import BaseButton from '@/components/base/BaseButton.vue';
 import BaseCheckbox from '@/components/base/BaseCheckbox.vue';
 import BasePagination from '@/components/base/BasePagination.vue';

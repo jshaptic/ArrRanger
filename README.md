@@ -1,4 +1,4 @@
-# ArrRanger
+# Fleetarr
 
 A mass-editing and staging tool for Radarr and Sonarr, in the spirit of a partition
 manager: you make all your edits against a snapshot, review them as a batch, and only
@@ -19,25 +19,6 @@ Five views, four of them fleet-wide:
 | **Import lists** (`/import-lists`) | Every list and which instances have it. Copy one onto another instance, enable or disable in bulk. |
 | **Media** (`/media`) | Every movie and series across the fleet, one row per title. A filter language with and/or over any field - including which import list a title came from - and bulk tagging, root-folder moves, profile changes, monitoring and deletion. |
 | **Queue** (`/queue`) | Everything staged, in the order it will run, with the full *Arr exchange for each item after it has. |
-
-### The media filter
-
-`/media` has its own expression language, shared between the server and the browser so both
-reach the same verdict:
-
-```
-tags:4k year<2000 NOT list:"Trakt watchlist"    # and/or across fields; a space means AND
-instances>1                                     # every title the fleet holds twice
-instance:radarr-4k NOT any(instance:radarr-hd)  # on 4K, absent from HD
-all(monitored:false) added>-30d                 # added recently, monitored nowhere
-status:released hasFile:false monitored:true    # why has this not downloaded?
-size>20GB  root:/data/media/4k  tags:{4k,hdr}   # sizes, paths, brace-expanded values
-```
-
-Filtering, grouping and counting all happen server-side, so the summary above the table can
-never describe rows it has already removed. One thing it will not do is guess: Sonarr exposes
-no import-list contents endpoint, so `list:` cannot be answered for a series - those titles
-are counted and explained rather than quietly reported as matching nothing.
 
 ## Requirements
 
@@ -80,9 +61,9 @@ built SPA.
 
 Deployment notes:
 
-- **Volume**: everything stateful lives in `/config` - `arrranger.db` and, unless
-  `ARRRANGER_SECRET` is set, a generated `secret.key` (mode 0600).
-- **Unraid**: map `/config` to a path on the cache disk (`/mnt/cache/appdata/arrranger`)
+- **Volume**: everything stateful lives in `/config` - `fleetarr.db` and, unless
+  `FLEETARR_SECRET` is set, a generated `secret.key` (mode 0600).
+- **Unraid**: map `/config` to a path on the cache disk (`/mnt/cache/appdata/fleetarr`)
   rather than a `/mnt/user/...` share. SQLite in WAL mode on the FUSE share layer is a
   known source of "database is locked" errors - the same advice the *Arr apps give.
 - **PUID/PGID**: the entrypoint chowns `/config` and drops to those ids via `su-exec`
@@ -96,9 +77,9 @@ Deployment notes:
 | `PORT` | `8585` | HTTP port |
 | `HOST` | `0.0.0.0` | Bind address |
 | `CONFIG_DIR` | `/config` | Database + key file location |
-| `ARRRANGER_SECRET` | *(generated)* | Key material for encrypting stored *Arr API keys |
+| `FLEETARR_SECRET` | *(generated)* | Key material for encrypting stored *Arr API keys |
 | `LOG_LEVEL` | `info` | `fatal` \| `error` \| `warn` \| `info` \| `debug` \| `trace` |
-| `FS_ROOTS` | *(empty)* | Storage roots ArrRanger may inspect and modify, colon-separated. Empty disables all filesystem operations. |
+| `FS_ROOTS` | *(empty)* | Storage roots Fleetarr may inspect and modify, colon-separated. Empty disables all filesystem operations. |
 | `FS_LOW_SPACE_BYTES` | `50GiB` | A filesystem below this free space is flagged low. Accepts units: `50G`, `500MiB`, or a plain byte count. `0` disables. |
 | `FS_LOW_SPACE_PERCENT` | `0` | Also flag below this percentage free, OR'd with the floor above. Off by default - a ratio is loud on a large array. |
 | `TZ` | `Etc/UTC` | Container timezone |
@@ -111,7 +92,7 @@ Deployment notes:
 
 ## Storage access
 
-ArrRanger can also work directly on the media on disk - inspect folders, create, rename,
+Fleetarr can also work directly on the media on disk - inspect folders, create, rename,
 move and prune them - and those operations go into the *same* staging queue as the *Arr
 changes. That is what makes a mixed recipe possible:
 
@@ -120,7 +101,7 @@ changes. That is what makes a mixed recipe possible:
 
 ### The one rule
 
-**ArrRanger must see media at exactly the same container path the *Arr apps use.** Paths
+**Fleetarr must see media at exactly the same container path the *Arr apps use.** Paths
 are compared literally; there is deliberately no translation layer, because a wrong mapping
 that silently "works" would be far more dangerous than one that refuses. If the paths do
 not line up, the folder view says so per instance and tells you which mounts it has.
@@ -130,10 +111,10 @@ services:
   radarr:
     volumes:
       - /mnt/user/data:/data            # Radarr sees /data/media/movies
-  arrranger:
+  fleetarr:
     volumes:
-      - /mnt/cache/appdata/arrranger:/config
-      - /mnt/user/data:/data:rw         # so must ArrRanger
+      - /mnt/cache/appdata/fleetarr:/config
+      - /mnt/user/data:/data:rw         # so must Fleetarr
     environment:
       FS_ROOTS: /data
       PUID: "99"                        # the same ids the *Arr containers run as
@@ -143,7 +124,7 @@ services:
 
 One binding for the whole tree, not one per library: a rename is only atomic *inside* a
 single filesystem, and separate bindings turn every move into a cross-device copy that
-ArrRanger refuses (see below). This is the same reasoning behind the well-known
+Fleetarr refuses (see below). This is the same reasoning behind the well-known
 single-`/data`-volume layout for hardlinks and atomic moves.
 
 ### Permissions
@@ -152,13 +133,13 @@ The container needs write access as `PUID:PGID`; it never tries to take it. The 
 reports what it found at boot, so a mismatch is one `docker logs` away:
 
 ```
-[arrranger] storage root /data owner=99:100 mode=775 writable as 99:100
-[arrranger] storage root /data owner=0:0 mode=755 NOT WRITABLE as 99:100
-[arrranger]   fix: match PUID/PGID to the owner above, or give that group write access
+[fleetarr] storage root /data owner=99:100 mode=775 writable as 99:100
+[fleetarr] storage root /data owner=0:0 mode=755 NOT WRITABLE as 99:100
+[fleetarr]   fix: match PUID/PGID to the owner above, or give that group write access
 ```
 
 `/config` is chowned to `PUID:PGID` as before. **Media roots are never chowned** - a
-recursive chown across an array is slow, destructive, and not ArrRanger's business.
+recursive chown across an array is slow, destructive, and not Fleetarr's business.
 
 On Unraid, `/mnt/user/data` is the right source for media (the FUSE share layer is fine
 here, unlike for the SQLite database, which belongs on the cache disk).
@@ -170,30 +151,6 @@ here, unlike for the SQLite database, which belongs on the cache disk).
 | Scope | Directories only. No file-level create, rename or delete. |
 | Traversal | Every path is resolved against the configured roots; the parent chain is realpath'd, so a symlink cannot be used to escape. A symlink *leaf* is left unresolved, so "move this link" can never silently move the library behind it. |
 | Symlinks | Shown in the folder view, never followed and never mutated. |
-| Deleting | Hard delete, no recycle bin. Non-empty needs `recursive`; a folder a connected instance still tracks needs `force`, and so does one ArrRanger cannot *check* - an unreachable instance is never read as a cleared one; the UI makes you type the folder name. Deleting a storage root or a mount point is refused outright. |
+| Deleting | Hard delete, no recycle bin. Non-empty needs `recursive`; a folder a connected instance still tracks needs `force`, and so does one Fleetarr cannot *check* - an unreachable instance is never read as a cleared one; the UI makes you type the folder name. Deleting a storage root or a mount point is refused outright. |
 | Cross-filesystem moves | **Refused.** The preflight compares device ids and reports how much would have to be copied: move it with your own tool (unBALANCE, rsync), then re-map the instances onto it. |
 | Preflight | Runs before staging *and* again immediately before execution, so a staged operation that went stale fails with `fs_precondition_failed` instead of acting on a filesystem nobody reviewed. |
-
-### Rename &amp; align
-
-The headline workflow, and the reason renaming is one action rather than two: it is the
-`rename` dialog on any folder an instance roots at, where the owning instances are listed
-as checkboxes. Give the folder a new name, leave the instances ticked, and ArrRanger stages
-one dependent chain:
-
-```
-1. fs.rename /data/movies -> /data/films                    (host, no instance)
-2. rootFolder.create /data/films        on Radarr-4K   waits for 1
-3. media.moveRootFolder {moveFiles: false}  on Radarr-4K   waits for 2   ← no copy
-4. media.refresh                        on Radarr-4K   waits for 3
-5. rootFolder.delete /data/movies       on Radarr-4K   waits for 3
-```
-
-If the disk step fails, every step behind it is skipped and the run halts - verified in a
-container: with the volume read-only, the rename failed with `fs_permission_denied` and
-**zero *Arr requests were made**.
-
-An instance that roots here but has downloaded nothing yet skips steps 3 and 4 - there are
-no ids to bulk-edit, and an editor call with an empty list is a request *Arr has no reason
-to accept - but it still gets steps 2 and 5, because a root folder is configuration and
-being empty is not a reason to leave it pointing at a path that no longer exists.

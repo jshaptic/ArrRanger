@@ -9,7 +9,7 @@ import {
   type FsPreflight,
   type FsRootsResponse,
   type PathMatrixResponse,
-} from '@arrranger/shared';
+} from '@fleetarr/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { PATH_SORTS } from '../services/path-matrix.service.js';
 import { z } from 'zod';

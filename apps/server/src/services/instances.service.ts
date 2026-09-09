@@ -7,7 +7,7 @@ import {
   type Instance,
   type InstanceWithKey,
   type UpdateInstance,
-} from '@arrranger/shared';
+} from '@fleetarr/shared';
 import { ArrClient } from '../arr/client.js';
 import type { ArrDispatcherPool } from '../arr/http.js';
 import type { InstancesRepository } from '../repositories/instances.repo.js';

@@ -25,7 +25,7 @@ import {
   type ConnectionTestResult,
   type InstanceWithKey,
   type MediaKind,
-} from '@arrranger/shared';
+} from '@fleetarr/shared';
 import { ArrApiError, ValidationError } from '../lib/errors.js';
 import {
   arrRequest,
@@ -84,7 +84,7 @@ export interface BulkEditParams {
 
 export interface BulkDeleteParams {
   readonly mediaIds: readonly number[];
-  /** The destructive one: the files leave the disk and ArrRanger cannot put them back. */
+  /** The destructive one: the files leave the disk and Fleetarr cannot put them back. */
   readonly deleteFiles: boolean;
   /** Without it, the next import-list sync may re-add everything just removed. */
   readonly addImportExclusion: boolean;

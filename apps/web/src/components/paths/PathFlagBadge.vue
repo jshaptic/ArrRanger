@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { PathFlag } from '@arrranger/shared';
+import type { PathFlag } from '@fleetarr/shared';
 import { FLAG_STYLES } from '@/lib/path-matrix';
 
 defineProps<{ flag: PathFlag }>();

@@ -5,7 +5,7 @@ import type {
   NewQueueItem,
   QueueListResponse,
   RunResponse,
-} from '@arrranger/shared';
+} from '@fleetarr/shared';
 import { serverApiKey, startFakeArr, type FakeArrServer } from './fake-arr.js';
 import { api, makeTempDir, readSse, removeTempDir, startTestApp, type TestApp } from './helpers.js';
 

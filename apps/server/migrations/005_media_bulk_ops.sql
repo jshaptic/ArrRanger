@@ -1,4 +1,4 @@
--- ArrRanger schema v5: the /media view's bulk operations.
+-- Fleetarr schema v5: the /media view's bulk operations.
 --
 -- Adds mediaTags.set (replace, including "clear all"), media.setMonitored,
 -- media.setQualityProfile and media.delete. target_kind is unchanged: 'movie' and 'series'

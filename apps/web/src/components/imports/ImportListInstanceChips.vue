@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue';
-import type { Instance, QueueItem } from '@arrranger/shared';
+import type { Instance, QueueItem } from '@fleetarr/shared';
 import ImportListInstanceCard from './ImportListInstanceCard.vue';
 import BaseInstanceBadge from '@/components/base/BaseInstanceBadge.vue';
 import IconCreate from '@/components/base/icons/IconCreate.vue';

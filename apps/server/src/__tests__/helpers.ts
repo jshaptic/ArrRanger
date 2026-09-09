@@ -23,7 +23,7 @@ export function testConfig(configDir: string, overrides: Partial<AppConfig> = {}
     host: '127.0.0.1',
     port: 0,
     configDir,
-    databaseFile: path.join(configDir, 'arrranger.db'),
+    databaseFile: path.join(configDir, 'fleetarr.db'),
     migrationsDir: fileURLToPath(new URL('../../migrations/', import.meta.url)),
     webRoot: path.join(configDir, 'no-web-build'),
     logLevel: 'fatal',
@@ -40,7 +40,7 @@ export function testConfig(configDir: string, overrides: Partial<AppConfig> = {}
 }
 
 export function makeTempDir(): string {
-  return mkdtempSync(path.join(tmpdir(), 'arrranger-test-'));
+  return mkdtempSync(path.join(tmpdir(), 'fleetarr-test-'));
 }
 
 /** Boots the real app on an ephemeral port - SSE needs a socket, so no inject(). */

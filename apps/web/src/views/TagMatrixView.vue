@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import type { NewQueueItem } from '@arrranger/shared';
+import type { NewQueueItem } from '@fleetarr/shared';
 import BaseButton from '@/components/base/BaseButton.vue';
 import EmptyState from '@/components/base/EmptyState.vue';
 import FleetBar from '@/components/fleet/FleetBar.vue';
@@ -211,7 +211,7 @@ onMounted(() => {
     <EmptyState
       v-if="matrix.columns.length === 0"
       title="No instances connected"
-      description="ArrRanger compares tags across every connected Radarr and Sonarr. Add at least one instance to see the parity matrix."
+      description="Fleetarr compares tags across every connected Radarr and Sonarr. Add at least one instance to see the parity matrix."
       :icon="IconTag"
     >
       <RouterLink to="/instances">

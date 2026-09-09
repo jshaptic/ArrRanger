@@ -33,7 +33,7 @@ RUN npm run build
 # -w flags also keep the web workspace's runtime deps out: Vite bundles them into
 # apps/web/dist at build time, so nothing needs them at runtime.
 FROM deps AS prod-deps
-RUN npm ci --omit=dev --include-workspace-root -w @arrranger/server -w @arrranger/shared \
+RUN npm ci --omit=dev --include-workspace-root -w @fleetarr/server -w @fleetarr/shared \
  && npm cache clean --force
 
 # ---------- runtime ----------

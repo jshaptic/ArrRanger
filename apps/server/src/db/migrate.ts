@@ -18,7 +18,7 @@ function readPragmaFlag(db: SqliteDatabase, name: string): boolean {
 /**
  * Forward-only file migrations. Each file runs inside its own transaction and is
  * recorded in `schema_migrations`; `user_version` mirrors the highest applied file
- * so `sqlite3 arrranger.db 'PRAGMA user_version'` tells you where you are.
+ * so `sqlite3 fleetarr.db 'PRAGMA user_version'` tells you where you are.
  *
  * Foreign keys are disabled for the duration of a migration and re-checked afterwards.
  * SQLite's table-rebuild recipe (create -> copy -> drop -> rename) needs that: with

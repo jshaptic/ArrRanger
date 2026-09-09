@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import type { FsPreflight, NewFsQueueItem } from '@arrranger/shared';
+import type { FsPreflight, NewFsQueueItem } from '@fleetarr/shared';
 import BaseButton from '@/components/base/BaseButton.vue';
 import BaseModal from '@/components/base/BaseModal.vue';
 import { planNewFolders } from '@/lib/new-folders';

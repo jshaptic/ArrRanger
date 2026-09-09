@@ -1,4 +1,4 @@
-import type { ArrImportList, ArrRootFolder, ArrTagDetail, Instance } from '@arrranger/shared';
+import type { ArrImportList, ArrRootFolder, ArrTagDetail, Instance } from '@fleetarr/shared';
 import { describe, expect, it } from 'vitest';
 import {
   buildImportListRows,

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { MEDIA_FILTER_FIELDS, parseMediaFilter } from '@arrranger/shared';
+import { MEDIA_FILTER_FIELDS, parseMediaFilter } from '@fleetarr/shared';
 import IconClose from '@/components/base/icons/IconClose.vue';
 import IconHelp from '@/components/base/icons/IconHelp.vue';
 import IconWarning from '@/components/base/icons/IconWarning.vue';

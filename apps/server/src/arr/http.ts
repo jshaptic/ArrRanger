@@ -1,5 +1,5 @@
 import { Agent, fetch as undiciFetch, type Dispatcher } from 'undici';
-import type { InstanceWithKey } from '@arrranger/shared';
+import type { InstanceWithKey } from '@fleetarr/shared';
 import { ArrApiError } from '../lib/errors.js';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';

@@ -1,5 +1,5 @@
 {
-  "name": "arrranger",
+  "name": "fleetarr",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,16 +12,16 @@
   },
   "scripts": {
     "dev": "run-p dev:shared dev:server dev:web",
-    "dev:shared": "npm run -w @arrranger/shared dev",
-    "dev:server": "npm run -w @arrranger/server dev",
-    "dev:web": "npm run -w @arrranger/web dev",
-    "build": "npm run -w @arrranger/shared build && npm run -w @arrranger/server build && npm run -w @arrranger/web build",
+    "dev:shared": "npm run -w @fleetarr/shared dev",
+    "dev:server": "npm run -w @fleetarr/server dev",
+    "dev:web": "npm run -w @fleetarr/web dev",
+    "build": "npm run -w @fleetarr/shared build && npm run -w @fleetarr/server build && npm run -w @fleetarr/web build",
     "start": "node apps/server/dist/index.js",
     "typecheck": "npm run -ws --if-present typecheck",
     "clean": "rm -rf packages/*/dist apps/*/dist",
     "docker:build": "docker compose build",
     "docker:up": "docker compose up -d",
-    "docker:logs": "docker compose logs -f arrranger",
+    "docker:logs": "docker compose logs -f fleetarr",
     "test": "npm run -ws --if-present test"
   },
   "devDependencies": {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { MediaFlag, MediaRow } from '@arrranger/shared';
+import type { MediaFlag, MediaRow } from '@fleetarr/shared';
 import {
   MEDIA_FLAG_FILTER,
   MEDIA_FLAG_STYLES,

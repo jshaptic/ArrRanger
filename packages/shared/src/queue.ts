@@ -117,7 +117,7 @@ export interface QueueOpPayloads {
   /**
    * Removes the items from the instance.
    *
-   * `deleteFiles` is the irreversible one - the files leave the disk and ArrRanger cannot
+   * `deleteFiles` is the irreversible one - the files leave the disk and Fleetarr cannot
    * put them back. Without `addImportExclusion` the next list sync may re-add everything
    * just removed, so both are explicit rather than defaulted.
    */

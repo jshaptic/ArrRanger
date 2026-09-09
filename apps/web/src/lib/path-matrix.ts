@@ -13,7 +13,7 @@ import {
   type PathOwner,
   type PathSeverity,
   type PathUse,
-} from '@arrranger/shared';
+} from '@fleetarr/shared';
 import { pluralise } from './format';
 
 /**
@@ -639,7 +639,7 @@ export const FLAG_STYLES: Record<PathFlag, { label: string; classes: string; tit
   symlink: {
     label: 'symlink',
     classes: 'border-accent/50 bg-accent/10 text-accent',
-    title: 'ArrRanger never follows or mutates symlinks',
+    title: 'Fleetarr never follows or mutates symlinks',
   },
   unreadable: {
     label: 'no access',

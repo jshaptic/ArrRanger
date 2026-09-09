@@ -6,7 +6,7 @@ import type {
   PathOwner,
   PathRollup,
   PathUse,
-} from '@arrranger/shared';
+} from '@fleetarr/shared';
 import { describe, expect, it } from 'vitest';
 import {
   actionsFor,

@@ -3,7 +3,7 @@ import type { FsOp, QueuePayloadFor } from './queue.js';
 /**
  * Contracts for storage inspection and staged disk work.
  *
- * ArrRanger only ever reports paths as the *container* sees them, which is the same path
+ * Fleetarr only ever reports paths as the *container* sees them, which is the same path
  * the *Arr instances must see - see the Storage access section of the README.
  */
 

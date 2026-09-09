@@ -1,4 +1,4 @@
-import type { MediaPageResponse, ResourceSnapshotResponse } from '@arrranger/shared';
+import type { MediaPageResponse, ResourceSnapshotResponse } from '@fleetarr/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 

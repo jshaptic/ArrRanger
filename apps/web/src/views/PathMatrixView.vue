@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import { matchPathFilter, type PathNode } from '@arrranger/shared';
+import { matchPathFilter, type PathNode } from '@fleetarr/shared';
 import BaseButton from '@/components/base/BaseButton.vue';
 import EmptyState from '@/components/base/EmptyState.vue';
 import FleetBar from '@/components/fleet/FleetBar.vue';
@@ -289,7 +289,7 @@ onMounted(async () => {
     <EmptyState
       v-if="!paths.enabled && !paths.loading"
       title="Filesystem access is off"
-      description="ArrRanger can inspect and reorganise media folders once it can see them. Mount your media at the same path the *Arr containers use, then set FS_ROOTS."
+      description="Fleetarr can inspect and reorganise media folders once it can see them. Mount your media at the same path the *Arr containers use, then set FS_ROOTS."
       :icon="IconStorage"
     >
       <pre class="mt-1 overflow-x-auto rounded-md border border-line bg-raised px-3 py-2 text-left font-mono text-[11px] text-muted">volumes:
@@ -323,7 +323,7 @@ environment:
           </li>
         </ul>
         <p class="mt-2 text-[11px] leading-relaxed text-muted">
-          That is a volume mapping difference, not missing media. ArrRanger deliberately does
+          That is a volume mapping difference, not missing media. Fleetarr deliberately does
           not translate paths: mount the same host directory at the same container path as the
           *Arr apps, and this panel disappears. Those root folders are listed below as rows
           marked <span class="font-mono">not mounted here</span>.

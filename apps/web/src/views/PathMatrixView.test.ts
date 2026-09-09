@@ -9,7 +9,7 @@ import type {
   PathOwner,
   PathRollup,
   PathUse,
-} from '@arrranger/shared';
+} from '@fleetarr/shared';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';

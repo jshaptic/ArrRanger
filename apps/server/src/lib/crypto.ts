@@ -2,7 +2,9 @@ import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:
 import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 
 const ALGORITHM = 'aes-256-gcm';
-const KEY_SALT = 'arrranger.v1';
+// Stable KDF salt. The value predates the Fleetarr rename and must not change:
+// altering it would make every stored *Arr API key unreadable.
+const KEY_SALT = 'fleetarr.v1';
 const BLOB_VERSION = 'v1';
 
 /** Stretch the configured secret into a 32-byte AES key. */
@@ -36,9 +38,9 @@ export function decryptSecret(key: Buffer, blob: string): string {
 }
 
 /**
- * Prefer ARRRANGER_SECRET; otherwise persist a generated key next to the database.
+ * Prefer FLEETARR_SECRET; otherwise persist a generated key next to the database.
  *
- * This protects against a stray `cat arrranger.db` leaking API keys. It is not
+ * This protects against a stray `cat fleetarr.db` leaking API keys. It is not
  * protection against someone holding both the /config volume and the environment.
  */
 export function resolveSecret(envSecret: string | undefined, keyFile: string): string {

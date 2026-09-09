@@ -5,7 +5,7 @@ import type {
   InstanceListResponse,
   InstanceResponse,
   UpdateInstanceInput,
-} from '@arrranger/shared';
+} from '@fleetarr/shared';
 import { api } from './client';
 
 export const instancesApi = {

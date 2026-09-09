@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import type { FsOp, FsPreflight, NewFsQueueItem } from '@arrranger/shared';
+import type { FsOp, FsPreflight, NewFsQueueItem } from '@fleetarr/shared';
 import BaseButton from '@/components/base/BaseButton.vue';
 import BaseModal from '@/components/base/BaseModal.vue';
 import { resourcesApi } from '@/api/resources';
@@ -362,7 +362,7 @@ watch([name, destination, recursive, force], () => void check());
 
       <div v-else class="space-y-3">
         <p class="rounded-md border border-danger/40 bg-danger/5 px-3 py-2 text-xs leading-relaxed text-danger">
-          This deletes the folder and everything under it from disk. ArrRanger has no recycle
+          This deletes the folder and everything under it from disk. Fleetarr has no recycle
           bin - once the queue applies this step, the only way back is your backups.
         </p>
         <label class="flex items-start gap-2 text-xs text-muted">

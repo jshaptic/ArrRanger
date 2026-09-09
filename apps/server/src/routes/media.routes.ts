@@ -5,7 +5,7 @@ import {
   parseMediaFilter,
   type MediaFleetResponse,
   type MediaIdsResponse,
-} from '@arrranger/shared';
+} from '@fleetarr/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { MAX_MEDIA_PAGE_SIZE } from '../services/media-fleet.service.js';

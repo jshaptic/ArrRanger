@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import type { ApiErrorResponse, InstanceResponse, MediaFleetResponse, MediaIdsResponse } from '@arrranger/shared';
+import type { ApiErrorResponse, InstanceResponse, MediaFleetResponse, MediaIdsResponse } from '@fleetarr/shared';
 import { serverApiKey, startFakeArr, type FakeArrServer } from './fake-arr.js';
 import { api, makeTempDir, removeTempDir, startTestApp, type TestApp } from './helpers.js';
 

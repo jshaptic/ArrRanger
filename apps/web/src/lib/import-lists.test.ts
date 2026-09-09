@@ -1,4 +1,4 @@
-import type { ArrImportList, Instance } from '@arrranger/shared';
+import type { ArrImportList, Instance } from '@fleetarr/shared';
 import { describe, expect, it } from 'vitest';
 import {
   canCloneImportList,

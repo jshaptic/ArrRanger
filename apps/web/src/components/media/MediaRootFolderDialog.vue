@@ -13,7 +13,7 @@ import { useQueueStore, type MediaMoveTarget, type MediaTarget } from '@/stores/
  * Move the selected copies to a root folder chosen **per instance**.
  *
  * One box per instance rather than one for the fleet, and they start blank on purpose:
- * ArrRanger never translates a path from one instance onto another, and pre-filling them all
+ * Fleetarr never translates a path from one instance onto another, and pre-filling them all
  * from a single value is exactly how a translation sneaks in wearing a convenience's clothes.
  */
 const props = defineProps<{ targets: readonly MediaTarget[] }>();
@@ -128,7 +128,7 @@ async function confirm(): Promise<void> {
       </div>
 
       <p class="text-[11px] leading-relaxed text-muted">
-        The path is copied as-is, never translated - ArrRanger does not map one instance's paths
+        The path is copied as-is, never translated - Fleetarr does not map one instance's paths
         onto another's, and each instance must see the folder at exactly the path written here.
       </p>
 
@@ -141,7 +141,7 @@ async function confirm(): Promise<void> {
               <template v-if="moveFiles">
                 <span class="text-danger">
                   <IconWarning /> *Arr will physically relocate {{ totalItems }} item(s). This is
-                  slow, needs free space at the destination, and cannot be undone by ArrRanger.
+                  slow, needs free space at the destination, and cannot be undone by Fleetarr.
                 </span>
               </template>
               <template v-else>

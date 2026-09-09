@@ -5,7 +5,7 @@ import {
   type Instance,
   type InstanceWithKey,
   type UpdateInstance,
-} from '@arrranger/shared';
+} from '@fleetarr/shared';
 import type { SqliteDatabase } from '../db/client.js';
 import { fromBool, nowIso, rowToInstance } from '../db/mappers.js';
 import type { InstanceRow } from '../db/rows.js';

@@ -1,5 +1,5 @@
 {
-  "name": "@arrranger/web",
+  "name": "@fleetarr/web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -25,6 +25,6 @@
     "vue-tsc": "^3.3.11"
   },
   "dependencies": {
-    "@arrranger/shared": "^0.1.0"
+    "@fleetarr/shared": "^0.1.0"
   }
 }

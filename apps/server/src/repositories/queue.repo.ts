@@ -8,7 +8,7 @@ import {
   type NewQueueItem,
   type QueueItem,
   type QueueItemStatus,
-} from '@arrranger/shared';
+} from '@fleetarr/shared';
 import type { SqliteDatabase } from '../db/client.js';
 import { nowIso, rowToQueueItem } from '../db/mappers.js';
 import type { QueueItemRow } from '../db/rows.js';

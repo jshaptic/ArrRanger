@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { MediaFacet, MediaRow } from '@arrranger/shared';
+import type { MediaFacet, MediaRow } from '@fleetarr/shared';
 import MediaInstanceCard from './MediaInstanceCard.vue';
 import BaseInstanceBadge from '@/components/base/BaseInstanceBadge.vue';
 import IconUnknown from '@/components/base/icons/IconUnknown.vue';

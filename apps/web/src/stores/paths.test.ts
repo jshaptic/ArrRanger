@@ -1,4 +1,4 @@
-import type { PathMatrixLevel, PathMatrixResponse, PathNode, PathRollup } from '@arrranger/shared';
+import type { PathMatrixLevel, PathMatrixResponse, PathNode, PathRollup } from '@fleetarr/shared';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiRequestError } from '@/api/client';

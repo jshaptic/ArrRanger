@@ -7,7 +7,7 @@ import type {
   PathMatrixResponse,
   PathSelector,
   QueuePayloadFor,
-} from '@arrranger/shared';
+} from '@fleetarr/shared';
 import { api } from './client';
 
 export interface MatrixParams {

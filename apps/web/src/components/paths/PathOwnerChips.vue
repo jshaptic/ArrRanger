@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue';
-import type { PathOwner, QueueItem } from '@arrranger/shared';
+import type { PathOwner, QueueItem } from '@fleetarr/shared';
 import PathOwnerCard from './PathOwnerCard.vue';
 import { ownerHeadline, ownerMedia, USE_CLASSES } from '@/lib/path-matrix';
 import { stagedIntent, TONE_CLASSES } from '@/lib/staging';

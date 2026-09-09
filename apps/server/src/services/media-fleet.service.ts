@@ -28,7 +28,7 @@ import {
   type MediaSortDirection,
   type MediaUndecidedMode,
   type MediaUndecidedReason,
-} from '@arrranger/shared';
+} from '@fleetarr/shared';
 import { serialiseError, ValidationError } from '../lib/errors.js';
 import type { InstancesRepository } from '../repositories/instances.repo.js';
 import { isAtOrUnder, normalisePath } from './path-index.service.js';

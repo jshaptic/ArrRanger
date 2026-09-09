@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import type { QueueItemDetailResponse, QueueRun } from '@arrranger/shared';
+import type { QueueItemDetailResponse, QueueRun } from '@fleetarr/shared';
 import { queueApi } from '@/api/queue';
 import BaseButton from '@/components/base/BaseButton.vue';
 import BaseInstanceBadge from '@/components/base/BaseInstanceBadge.vue';

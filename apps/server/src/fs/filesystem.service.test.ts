@@ -27,7 +27,7 @@ describe('FilesystemService', () => {
   let fs: FilesystemService;
 
   beforeEach(async () => {
-    root = mkdtempSync(path.join(tmpdir(), 'arrranger-fs-'));
+    root = mkdtempSync(path.join(tmpdir(), 'fleetarr-fs-'));
     seed(root);
     fs = await makeService([root]);
   });
@@ -151,7 +151,7 @@ describe('FilesystemService', () => {
     // /dev/shm is a separate tmpfs on Linux; skip where that is not true.
     let otherRoot: string;
     try {
-      otherRoot = mkdtempSync(path.join('/dev/shm', 'arrranger-other-'));
+      otherRoot = mkdtempSync(path.join('/dev/shm', 'fleetarr-other-'));
     } catch {
       t.skip('no second filesystem available');
       return;

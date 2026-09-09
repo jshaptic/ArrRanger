@@ -1,4 +1,4 @@
-import type { OnErrorPolicy, QueueEvent, QueueRun, QueueRunStatus } from '@arrranger/shared';
+import type { OnErrorPolicy, QueueEvent, QueueRun, QueueRunStatus } from '@fleetarr/shared';
 import type { SqliteDatabase } from '../db/client.js';
 import { nowIso, rowToQueueEvent, rowToQueueRun } from '../db/mappers.js';
 import type { QueueEventRow, QueueRunRow } from '../db/rows.js';

@@ -1,4 +1,4 @@
--- ArrRanger schema v2: filesystem operations in the same queue as *Arr operations.
+-- Fleetarr schema v2: filesystem operations in the same queue as *Arr operations.
 --
 -- SQLite cannot relax NOT NULL or edit a CHECK constraint, so queue_items is rebuilt.
 -- The migration runner disables foreign keys around this file (outside the transaction,

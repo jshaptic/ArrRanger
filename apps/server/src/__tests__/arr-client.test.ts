@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { after, before, describe, test } from 'node:test';
-import type { ArrMedia, InstanceWithKey } from '@arrranger/shared';
+import type { ArrMedia, InstanceWithKey } from '@fleetarr/shared';
 import { ArrClient, pageMedia } from '../arr/client.js';
 import { ArrDispatcherPool } from '../arr/http.js';
 import { ArrApiError } from '../lib/errors.js';

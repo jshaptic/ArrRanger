@@ -18,9 +18,9 @@ export interface AppConfig {
   readonly trustProxy: boolean;
   readonly corsOrigins: readonly string[];
   /**
-   * Storage roots ArrRanger may inspect and modify, colon-separated like PATH. Empty
+   * Storage roots Fleetarr may inspect and modify, colon-separated like PATH. Empty
    * disables every filesystem operation. These must be the same paths the *Arr containers
-   * see - ArrRanger deliberately has no path translation layer.
+   * see - Fleetarr deliberately has no path translation layer.
    */
   readonly fsRoots: readonly string[];
   /**
@@ -158,7 +158,7 @@ export function loadConfig(): AppConfig {
     host: envString('HOST') ?? '0.0.0.0',
     port: envInt('PORT', 8585),
     configDir,
-    databaseFile: path.join(configDir, 'arrranger.db'),
+    databaseFile: path.join(configDir, 'fleetarr.db'),
     migrationsDir: envString('MIGRATIONS_DIR') ?? fromServerRoot('../migrations/'),
     webRoot: envString('WEB_ROOT') ?? fromServerRoot('../../web/dist/'),
     logLevel: envLogLevel('info'),
@@ -173,7 +173,7 @@ export function loadConfig(): AppConfig {
       .filter((root) => root.length > 0),
     lowSpaceBytes: envBytes('FS_LOW_SPACE_BYTES', DEFAULT_LOW_SPACE_BYTES),
     lowSpacePercent: envInt('FS_LOW_SPACE_PERCENT', 0),
-    secret: resolveSecret(process.env['ARRRANGER_SECRET'], path.join(configDir, 'secret.key')),
+    secret: resolveSecret(envString('FLEETARR_SECRET'), path.join(configDir, 'secret.key')),
   };
 
   return Object.freeze(config);

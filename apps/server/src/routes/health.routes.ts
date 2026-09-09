@@ -1,4 +1,4 @@
-import type { HealthResponse } from '@arrranger/shared';
+import type { HealthResponse } from '@fleetarr/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { getSchemaVersion } from '../db/client.js';
 

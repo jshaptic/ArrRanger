@@ -1,4 +1,4 @@
-import type { MediaPageResponse, ResourceSnapshotResponse } from '@arrranger/shared';
+import type { MediaPageResponse, ResourceSnapshotResponse } from '@fleetarr/shared';
 import { api } from './client';
 
 export interface MediaQueryParams {

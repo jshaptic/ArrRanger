@@ -4,7 +4,7 @@ import {
   type QueueItem,
   type QueueRun,
   type RunEvent,
-} from '@arrranger/shared';
+} from '@fleetarr/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import { ArrClient } from '../arr/client.js';
 import type { ArrDispatcherPool, ArrHttpTrace } from '../arr/http.js';
@@ -98,7 +98,7 @@ export class QueueExecutor {
         if (item.status !== 'running') continue;
         this.deps.queue.markFailed(item.id, {
           code: 'interrupted',
-          message: 'Interrupted by an ArrRanger restart - the *Arr instance may have applied it',
+          message: 'Interrupted by an Fleetarr restart - the *Arr instance may have applied it',
           httpStatus: null,
         });
       }
@@ -106,7 +106,7 @@ export class QueueExecutor {
       this.deps.runs.update(run.id, {
         status: 'paused',
         currentItemId: null,
-        error: 'Interrupted by an ArrRanger restart',
+        error: 'Interrupted by an Fleetarr restart',
       });
       this.deps.logger.warn({ runId: run.id }, 'recovered interrupted run as paused');
     }

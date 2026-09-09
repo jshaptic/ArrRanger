@@ -9,7 +9,7 @@ async function main(): Promise<void> {
 
   const migration = runMigrations(db, config.migrationsDir, (message) =>
     // eslint-disable-next-line no-console -- the logger does not exist yet
-    console.log(`[arrranger] ${message}`),
+    console.log(`[fleetarr] ${message}`),
   );
 
   const app = await buildApp({ config, db });
@@ -21,7 +21,7 @@ async function main(): Promise<void> {
       migrationsApplied: migration.applied.length,
       webRoot: config.webRoot,
     },
-    'arrranger starting',
+    'fleetarr starting',
   );
 
   let shuttingDown = false;
@@ -45,6 +45,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  console.error('[arrranger] fatal startup error', error);
+  console.error('[fleetarr] fatal startup error', error);
   process.exit(1);
 });

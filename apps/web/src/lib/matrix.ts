@@ -1,4 +1,4 @@
-import type { ArrImportList, ArrQualityProfile, ArrRootFolder, ArrTagDetail, Instance } from '@arrranger/shared';
+import type { ArrImportList, ArrQualityProfile, ArrRootFolder, ArrTagDetail, Instance } from '@fleetarr/shared';
 
 /**
  * Fleet normalisation.

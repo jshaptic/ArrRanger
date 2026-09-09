@@ -1,4 +1,4 @@
-import type { ApiErrorResponse } from '@arrranger/shared';
+import type { ApiErrorResponse } from '@fleetarr/shared';
 
 /** Thrown for any non-2xx /api response, carrying the server's error envelope. */
 export class ApiRequestError extends Error {

@@ -1,4 +1,4 @@
-import type { MediaFleetColumn, MediaFleetResponse, MediaIdsResponse, MediaRow } from '@arrranger/shared';
+import type { MediaFleetColumn, MediaFleetResponse, MediaIdsResponse, MediaRow } from '@fleetarr/shared';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MediaParams } from '@/api/media';

@@ -1,5 +1,5 @@
 import type { Component } from 'vue';
-import type { QueueItem, QueueItemStatus, QueueOp } from '@arrranger/shared';
+import type { QueueItem, QueueItemStatus, QueueOp } from '@fleetarr/shared';
 import IconCreate from '@/components/base/icons/IconCreate.vue';
 import IconDelete from '@/components/base/icons/IconDelete.vue';
 import IconEdit from '@/components/base/icons/IconEdit.vue';

@@ -1,4 +1,4 @@
-import type { MediaFleetResponse, MediaIdsResponse, MediaSort, MediaSortDirection, MediaUndecidedMode } from '@arrranger/shared';
+import type { MediaFleetResponse, MediaIdsResponse, MediaSort, MediaSortDirection, MediaUndecidedMode } from '@fleetarr/shared';
 import { api } from './client';
 
 export interface MediaParams {

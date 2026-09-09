@@ -7,7 +7,7 @@ import {
   type ImportListChanges,
   type InstanceWithKey,
   type QueueItemOf,
-} from '@arrranger/shared';
+} from '@fleetarr/shared';
 import type { ArrClient } from '../arr/client.js';
 import type { FilesystemService } from '../fs/filesystem.service.js';
 import { ValidationError } from '../lib/errors.js';

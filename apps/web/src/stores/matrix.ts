@@ -1,4 +1,4 @@
-import type { Instance } from '@arrranger/shared';
+import type { Instance } from '@fleetarr/shared';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { ApiRequestError } from '@/api/client';

@@ -8,7 +8,7 @@ Keep this file under 200 lines. Tighten existing rules rather than adding sectio
   runs only from Apply All. No direct writes from a route handler or a store.
 - **NEVER render an unreachable instance as a configuration gap.** Unknown is not
   "missing": batch actions skip it, deletes need `force`, and the count is stated.
-- **NEVER translate paths.** ArrRanger and the *Arr apps must see identical container
+- **NEVER translate paths.** Fleetarr and the *Arr apps must see identical container
   paths; comparison is literal. A mismatch is reported, never bridged.
 - **ALWAYS `PUT` a merged resource** - fetch raw, merge changed keys, PUT (`mergeForPut`).
   A partial body silently wipes omitted fields.
@@ -107,7 +107,7 @@ than in a column. A low-space warning only ever lands on a mount or a root folde
 - **Apply `only`, `q` and `limit` before any per-child `stat`.** A level of 64 or fewer is
   served whole and fully probed; a bigger one defaults to problems-only. `empty` and
   `no access` need a read per child, so on a big level they report `null`, not zero.
-- **The parser lives in `@arrranger/shared`** so both sides share the verdict: `path-filter.ts`
+- **The parser lives in `@fleetarr/shared`** so both sides share the verdict: `path-filter.ts`
   for folders, `media-filter.ts` for titles, `expandBraces` for values in both.
 - Folders on the way to a match stay visible and **dimmed**; mounts and anything with a
   root folder below are never filtered away. In `exclude` mode nothing is protected.
@@ -152,7 +152,7 @@ than in a column. A low-space warning only ever lands on a mount or a root folde
 
 ## Storage access
 
-ArrRanger must see media at exactly the same container path the *Arr apps use - no
+Fleetarr must see media at exactly the same container path the *Arr apps use - no
 translation layer, one binding for the whole tree, so a rename stays atomic.
 
 | | |
@@ -183,9 +183,9 @@ translation layer, one binding for the whole tree, so a rename stays atomic.
 
 ## Data and security
 
-- API keys are AES-256-GCM encrypted before hitting SQLite, keyed from `ARRRANGER_SECRET` or
+- API keys are AES-256-GCM encrypted before hitting SQLite, keyed from `FLEETARR_SECRET` or
   `/config/secret.key`. **The key is never returned by the HTTP API** - keep the `Instance` vs
-  `InstanceWithKey` split in `packages/shared/src/instance.ts`. ArrRanger has no auth of its
+  `InstanceWithKey` split in `packages/shared/src/instance.ts`. Fleetarr has no auth of its
   own; do not bolt one on ad hoc.
 
 ## Toolchain pitfalls

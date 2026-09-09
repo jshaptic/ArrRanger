@@ -114,7 +114,7 @@ async function confirm(): Promise<void> {
                 <span class="text-danger">
                   <IconWarning /> This removes
                   <span class="font-medium">{{ bytes === null ? 'an unknown amount' : formatBytes(bytes) }}</span>
-                  and cannot be undone by ArrRanger.
+                  and cannot be undone by Fleetarr.
                 </span>
               </template>
               <template v-else>

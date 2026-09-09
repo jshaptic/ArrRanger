@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import type { Instance } from '@arrranger/shared';
+import type { Instance } from '@fleetarr/shared';
 import BaseButton from '@/components/base/BaseButton.vue';
 import EmptyState from '@/components/base/EmptyState.vue';
 import InstanceFormModal from '@/components/instances/InstanceFormModal.vue';
@@ -85,7 +85,7 @@ onMounted(() => {
     <EmptyState
       v-if="sorted.length === 0"
       title="No instances yet"
-      description="ArrRanger works across the whole fleet at once. Connect every Radarr and Sonarr you run - the comparison views only get useful with two or more."
+      description="Fleetarr works across the whole fleet at once. Connect every Radarr and Sonarr you run - the comparison views only get useful with two or more."
       :icon="IconInstance"
     >
       <BaseButton variant="primary" size="sm" @click="editing = null">Connect an instance</BaseButton>
@@ -182,7 +182,7 @@ onMounted(() => {
         <div class="w-full max-w-md rounded-xl border border-line bg-overlay p-5">
           <h2 class="text-base font-semibold text-ink">Remove {{ confirmingRemoval.name }}?</h2>
           <p class="mt-2 text-xs leading-relaxed text-muted">
-            ArrRanger forgets the connection and any staged operations targeting it. Nothing is
+            Fleetarr forgets the connection and any staged operations targeting it. Nothing is
             changed on the instance itself.
           </p>
           <div class="mt-4 flex justify-end gap-2">

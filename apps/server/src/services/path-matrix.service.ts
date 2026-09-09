@@ -1,6 +1,6 @@
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
-import { PATH_SEVERITIES, PATH_USES, parsePathFilter, passesPathFilter } from '@arrranger/shared';
+import { PATH_SEVERITIES, PATH_USES, parsePathFilter, passesPathFilter } from '@fleetarr/shared';
 import type {
   ArrRootFolder,
   PathFilter,
@@ -20,7 +20,7 @@ import type {
   PathSelector,
   PathSeverity,
   PathUse,
-} from '@arrranger/shared';
+} from '@fleetarr/shared';
 import { isLowSpace, type LowSpaceThresholds } from '../config.js';
 import type { FilesystemService } from '../fs/filesystem.service.js';
 import {

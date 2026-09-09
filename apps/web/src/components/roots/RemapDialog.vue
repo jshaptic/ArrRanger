@@ -181,7 +181,7 @@ watch(candidates, () => void loadCounts());
               <template v-if="moveFiles">
                 <span class="text-danger">
                   <IconWarning /> *Arr will physically relocate {{ totalMedia }} item(s). This is slow, needs free
-                  space at the destination, and cannot be undone by ArrRanger.
+                  space at the destination, and cannot be undone by Fleetarr.
                 </span>
               </template>
               <template v-else>

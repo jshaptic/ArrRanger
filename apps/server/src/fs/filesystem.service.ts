@@ -10,7 +10,7 @@ import type {
   FsRoot,
   FsRootsResponse,
   QueuePayloadFor,
-} from '@arrranger/shared';
+} from '@fleetarr/shared';
 import { FsError } from '../lib/errors.js';
 import type { PathReferences } from '../services/path-index.service.js';
 import {
@@ -142,7 +142,7 @@ export class FilesystemService {
     if (stats.isSymlink) {
       throw new FsError({
         code: 'fs_is_symlink',
-        message: `${target} is a symlink - ArrRanger does not follow links; browse the target path directly`,
+        message: `${target} is a symlink - Fleetarr does not follow links; browse the target path directly`,
         path: target,
       });
     }
@@ -381,7 +381,7 @@ export class FilesystemService {
       checks.push(ok('destination_writable', `${toParent} is writable`));
     }
 
-    // A rename cannot cross filesystems, and ArrRanger will not silently copy terabytes.
+    // A rename cannot cross filesystems, and Fleetarr will not silently copy terabytes.
     if (fromStats.exists && toParentStats.exists && fromStats.deviceId !== toParentStats.deviceId) {
       const measurement = await this.measure(from).catch(() => null);
       const size = measurement === null ? 'the folder' : formatBytes(measurement.sizeOnDisk);
@@ -495,7 +495,7 @@ export class FilesystemService {
             )
           : blocker(
               'referenced_by_arr',
-              'ArrRanger has no cached view of every instance, so it cannot tell whether one still has media here - refresh the fleet first, or force the deletion',
+              'Fleetarr has no cached view of every instance, so it cannot tell whether one still has media here - refresh the fleet first, or force the deletion',
             ),
       );
     } else {
@@ -510,7 +510,7 @@ export class FilesystemService {
       return [blocker('source_exists', `${target} does not exist`)];
     }
     if (stats.isSymlink) {
-      return [blocker('not_symlink', `${target} is a symlink - ArrRanger does not follow or mutate links`)];
+      return [blocker('not_symlink', `${target} is a symlink - Fleetarr does not follow or mutate links`)];
     }
     if (!stats.isDirectory) {
       return [blocker('is_directory', `${target} is not a directory - only folders can be staged`)];

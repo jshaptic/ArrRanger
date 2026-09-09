@@ -8,7 +8,7 @@ import type {
   RunEventsResponse,
   RunListResponse,
   RunResponse,
-} from '@arrranger/shared';
+} from '@fleetarr/shared';
 import { api } from './client';
 
 /** Every frame type the run stream can emit - EventSource needs them by name. */

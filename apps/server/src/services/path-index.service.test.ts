@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import type { ArrImportList, ArrMedia, ArrRootFolder, Instance } from '@arrranger/shared';
+import type { ArrImportList, ArrMedia, ArrRootFolder, Instance } from '@fleetarr/shared';
 import type { InstancesRepository } from '../repositories/instances.repo.js';
 import {
   isAtOrUnder,

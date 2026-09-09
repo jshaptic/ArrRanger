@@ -1,4 +1,4 @@
-import type { ArrImportList, ArrRootFolder, InstanceKind, PathImportList } from '@arrranger/shared';
+import type { ArrImportList, ArrRootFolder, InstanceKind, PathImportList } from '@fleetarr/shared';
 import type { InstancesRepository } from '../repositories/instances.repo.js';
 import type { ResourcesService } from './resources.service.js';
 

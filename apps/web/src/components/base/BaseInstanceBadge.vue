@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { InstanceKind } from '@arrranger/shared';
+import type { InstanceKind } from '@fleetarr/shared';
 import { initialsOf } from '@/lib/format';
 
 /**

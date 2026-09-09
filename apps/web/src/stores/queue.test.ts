@@ -1,4 +1,4 @@
-import type { NewQueueItem, QueueItem, QueueOp } from '@arrranger/shared';
+import type { NewQueueItem, QueueItem, QueueOp } from '@fleetarr/shared';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 

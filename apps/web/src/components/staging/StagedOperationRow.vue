@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { QueueItem } from '@arrranger/shared';
+import type { QueueItem } from '@fleetarr/shared';
 import BaseButton from '@/components/base/BaseButton.vue';
 import BaseInstanceBadge from '@/components/base/BaseInstanceBadge.vue';
 import { isDestructive, presentOp, STATUS_CLASSES, STATUS_LABELS, TONE_CLASSES } from '@/lib/staging';

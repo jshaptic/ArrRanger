@@ -16,8 +16,8 @@ describe('PathGuard', () => {
   let guard: PathGuard;
 
   before(async () => {
-    root = mkdtempSync(path.join(tmpdir(), 'arrranger-root-'));
-    outside = mkdtempSync(path.join(tmpdir(), 'arrranger-outside-'));
+    root = mkdtempSync(path.join(tmpdir(), 'fleetarr-root-'));
+    outside = mkdtempSync(path.join(tmpdir(), 'fleetarr-outside-'));
 
     mkdirSync(path.join(root, 'movies', 'Arrival (2016)'), { recursive: true });
     writeFileSync(path.join(root, 'movies', 'Arrival (2016)', 'movie.mkv'), 'x');
@@ -112,7 +112,7 @@ describe('PathGuard', () => {
   });
 
   test('is disabled when the configured root does not exist', async () => {
-    const missing = await PathGuard.create([path.join(tmpdir(), 'arrranger-does-not-exist')]);
+    const missing = await PathGuard.create([path.join(tmpdir(), 'fleetarr-does-not-exist')]);
     assert.equal(missing.enabled, true, 'configured but unusable');
     await assert.rejects(
       () => missing.resolve('/anything'),

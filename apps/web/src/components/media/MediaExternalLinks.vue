@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { MediaRow } from '@arrranger/shared';
+import type { MediaRow } from '@fleetarr/shared';
 import { externalLinks } from '@/lib/media';
 
 /**

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, type Component } from 'vue';
-import type { PathNode, PathSeverity, QueueItem } from '@arrranger/shared';
+import type { PathNode, PathSeverity, QueueItem } from '@fleetarr/shared';
 import IconCollapsed from '@/components/base/icons/IconCollapsed.vue';
 import IconCreate from '@/components/base/icons/IconCreate.vue';
 import IconDelete from '@/components/base/icons/IconDelete.vue';

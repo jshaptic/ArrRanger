@@ -4,7 +4,7 @@ import type {
   CreateInstanceInput,
   Instance,
   UpdateInstanceInput,
-} from '@arrranger/shared';
+} from '@fleetarr/shared';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { instancesApi } from '@/api/instances';

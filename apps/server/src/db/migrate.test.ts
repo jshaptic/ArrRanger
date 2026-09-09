@@ -41,7 +41,7 @@ describe('migration 002', () => {
 
   before(() => {
     configDir = makeTempDir();
-    db = openDatabase(path.join(configDir, 'arrranger.db'));
+    db = openDatabase(path.join(configDir, 'fleetarr.db'));
     seedVersionOne(db);
   });
 

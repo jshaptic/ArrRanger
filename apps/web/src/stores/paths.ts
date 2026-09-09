@@ -11,8 +11,8 @@ import type {
   PathMatrixTotals,
   PathNode,
   QueuePayloadFor,
-} from '@arrranger/shared';
-import { parsePathFilter } from '@arrranger/shared';
+} from '@fleetarr/shared';
+import { parsePathFilter } from '@fleetarr/shared';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { ApiRequestError } from '@/api/client';
@@ -76,7 +76,7 @@ export const usePathsStore = defineStore('paths', () => {
    * The filter, expanded.
    *
    * The server expands the very same source string for the very same reason, and the two
-   * must agree - which is why the expander lives in `@arrranger/shared` rather than in
+   * must agree - which is why the expander lives in `@fleetarr/shared` rather than in
    * either of them. Here it drives the flat list's own pruning, the "on the way to a
    * match" dimming and everything the filter bar reports back to the user.
    */

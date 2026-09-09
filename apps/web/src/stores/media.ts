@@ -8,8 +8,8 @@ import type {
   MediaSortDirection,
   MediaUndecidedMode,
   MediaUndecidedReason,
-} from '@arrranger/shared';
-import { parseMediaFilter } from '@arrranger/shared';
+} from '@fleetarr/shared';
+import { parseMediaFilter } from '@fleetarr/shared';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { ApiRequestError } from '@/api/client';
@@ -100,7 +100,7 @@ export const useMediaStore = defineStore('media', () => {
    * The filter, parsed.
    *
    * The server parses the very same source string for the very same reason, and the two must
-   * agree - which is why the parser lives in `@arrranger/shared`. Here it drives the error
+   * agree - which is why the parser lives in `@fleetarr/shared`. Here it drives the error
    * line, the typo hint, and the decision not to send a request at all.
    */
   const parsedFilter = computed(() => parseMediaFilter(filter.value));

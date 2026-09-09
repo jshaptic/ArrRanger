@@ -11,7 +11,7 @@ import {
   type RunEventsResponse,
   type RunListResponse,
   type RunResponse,
-} from '@arrranger/shared';
+} from '@fleetarr/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { SequencedRunEvent } from '../queue/events.js';

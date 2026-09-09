@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { QueueItem } from '@arrranger/shared';
+import type { QueueItem } from '@fleetarr/shared';
 import type { TagCell } from '@/lib/matrix';
 import { stagedIntent, TONE_CLASSES } from '@/lib/staging';
 import IconAbsent from '@/components/base/icons/IconAbsent.vue';

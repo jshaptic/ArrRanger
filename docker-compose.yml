@@ -1,10 +1,10 @@
 services:
-  arrranger:
+  fleetarr:
     build:
       context: .
       dockerfile: Dockerfile
-    image: arrranger:latest
-    container_name: arrranger
+    image: fleetarr:latest
+    container_name: fleetarr
     restart: unless-stopped
     ports:
       - "8585:8585"
@@ -17,24 +17,24 @@ services:
       PORT: "8585"
       CONFIG_DIR: /config
       LOG_LEVEL: info
-      # Storage ArrRanger may inspect and modify, colon-separated. MUST be the same paths
-      # the *Arr containers see - ArrRanger compares paths literally and never translates
+      # Storage Fleetarr may inspect and modify, colon-separated. MUST be the same paths
+      # the *Arr containers see - Fleetarr compares paths literally and never translates
       # them. Leave empty to disable every filesystem operation.
       FS_ROOTS: /data
       # Encrypts stored *Arr API keys. Generate once: openssl rand -base64 48
       # If unset, a key file is created at /config/secret.key instead.
-      ARRRANGER_SECRET: ${ARRRANGER_SECRET:-}
+      FLEETARR_SECRET: ${FLEETARR_SECRET:-}
     volumes:
       # Unraid: point at the cache disk directly, NOT /mnt/user/... - SQLite WAL on
       # the FUSE share layer is a known source of "database is locked" errors.
       # Local dev: swap for ./.config-dev:/config
-      - /mnt/cache/appdata/arrranger:/config
+      - /mnt/cache/appdata/fleetarr:/config
 
-      # Media. The container path must match what Radarr/Sonarr use, or ArrRanger will
+      # Media. The container path must match what Radarr/Sonarr use, or Fleetarr will
       # correctly report that their libraries do not exist here. One binding for the whole
       # tree - a rename can only be atomic inside a single filesystem, and separate
-      # bindings per library turn every move into a cross-device copy ArrRanger refuses.
-      #   /mnt/user/data on the host  ->  /data in Radarr, Sonarr AND ArrRanger
+      # bindings per library turn every move into a cross-device copy Fleetarr refuses.
+      #   /mnt/user/data on the host  ->  /data in Radarr, Sonarr AND Fleetarr
       - /mnt/user/data:/data:rw
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8585/api/health >/dev/null 2>&1 || exit 1"]

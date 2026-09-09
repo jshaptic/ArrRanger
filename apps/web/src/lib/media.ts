@@ -1,10 +1,10 @@
 import type { Component } from 'vue';
-import type { Instance, MediaFlag, MediaRow } from '@arrranger/shared';
+import type { Instance, MediaFlag, MediaRow } from '@fleetarr/shared';
 import IconError from '@/components/base/icons/IconError.vue';
 import IconWarning from '@/components/base/icons/IconWarning.vue';
 
 /**
- * Where a title can be looked up outside ArrRanger.
+ * Where a title can be looked up outside Fleetarr.
  *
  * Site names rather than one generic arrow glyph: which system it is *is* the information,
  * and an icon would hide exactly that. An id we do not have produces no link at all - never

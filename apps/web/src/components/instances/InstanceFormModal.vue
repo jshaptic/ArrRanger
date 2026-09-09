@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import type { ConnectionTestResult, Instance, InstanceKind } from '@arrranger/shared';
+import type { ConnectionTestResult, Instance, InstanceKind } from '@fleetarr/shared';
 import BaseButton from '@/components/base/BaseButton.vue';
 import BaseModal from '@/components/base/BaseModal.vue';
 import BaseSelect, { type SelectOption } from '@/components/base/BaseSelect.vue';
@@ -107,7 +107,7 @@ async function save(): Promise<void> {
 <template>
   <BaseModal
     :title="editing ? `Edit ${props.instance?.name ?? ''}` : 'Connect an instance'"
-    subtitle="ArrRanger stores the API key encrypted and never returns it to the browser"
+    subtitle="Fleetarr stores the API key encrypted and never returns it to the browser"
     @close="emit('close')"
   >
     <div class="space-y-3">

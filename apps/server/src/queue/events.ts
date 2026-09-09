@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import type { RunEvent } from '@arrranger/shared';
+import type { RunEvent } from '@fleetarr/shared';
 
 export interface SequencedRunEvent {
   /** Monotonic per-process id, used as the SSE `id:` field for Last-Event-ID replay. */

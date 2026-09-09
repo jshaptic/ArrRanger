@@ -10,7 +10,7 @@ import {
   type QueueRunStatus,
   type OnErrorPolicy,
   type TargetKind,
-} from '@arrranger/shared';
+} from '@fleetarr/shared';
 import type {
   InstanceRow,
   QueueEventRow,

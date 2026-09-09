@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import type { InstanceResponse, PathMatrixResponse, PathNode } from '@arrranger/shared';
+import type { InstanceResponse, PathMatrixResponse, PathNode } from '@fleetarr/shared';
 import {
   serverApiKey,
   startFakeArr,

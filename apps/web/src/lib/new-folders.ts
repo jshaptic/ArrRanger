@@ -11,7 +11,7 @@
  * paths a batch of `fs.mkdir` items would target; whether each one is possible is the
  * server's preflight to answer.
  */
-import { expandBraces } from '@arrranger/shared';
+import { expandBraces } from '@fleetarr/shared';
 
 /**
  * A folder name, written the way this box has to read it back.

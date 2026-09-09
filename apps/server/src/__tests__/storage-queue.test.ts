@@ -10,7 +10,7 @@ import type {
   QueueListResponse,
   PathMatrixResponse,
   RunResponse,
-} from '@arrranger/shared';
+} from '@fleetarr/shared';
 import { serverApiKey, startFakeArr, type FakeArrServer } from './fake-arr.js';
 import { api, makeTempDir, removeTempDir, startTestApp, waitFor, type TestApp } from './helpers.js';
 
