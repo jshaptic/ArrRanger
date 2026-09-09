@@ -3,6 +3,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-}
+        GIT_SHA: ${GIT_SHA:-}
+    # Published images: ghcr.io/<owner>/fleetarr:latest (releases) and :dev (main)
     image: fleetarr:latest
     container_name: fleetarr
     restart: unless-stopped

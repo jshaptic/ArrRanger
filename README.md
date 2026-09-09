@@ -41,6 +41,32 @@ or timezone. The compose file is written for Unraid-style `/mnt/user/data` and
 The image is a multi-stage build on `node:24-alpine`. The runtime stage is the production
 dependency tree, the compiled server, the migrations and the built SPA.
 
+Published images (after the first Actions run) live at `ghcr.io/<github-owner>/fleetarr`:
+
+| Tag | What it is |
+|---|---|
+| `dev` | Tip of `main`. App version is `0.1.0-dev.<sha>` (hash changes every commit). |
+| `latest` | Last manual release. App version is a clean `x.y.z` with no hash. |
+| `0.1.0-dev.abc1234` / `0.1.1` | Immutable pin of that build. |
+
+```bash
+docker pull ghcr.io/<github-owner>/fleetarr:latest   # released
+docker pull ghcr.io/<github-owner>/fleetarr:dev      # tip of main
+```
+
+If the GitHub repo is private, the package is private too: `docker login ghcr.io` with a
+PAT that has `read:packages`. A public repo still ships a private package until you flip
+it to public on the package's GitHub page.
+
+Cut a release from **Actions → Docker → Run workflow** on `main`: `patch`, `minor` or
+`major` bumps every workspace `package.json` (they stay in lockstep), pushes a
+`release: x.y.z` commit, tags `vX.Y.Z`, and moves `latest`. `current` publishes whatever
+is already in `package.json` without bumping — that is how `0.1.0` first becomes
+`latest`. `dev` only rebuilds the hashed image. `package.json` is never given a hash —
+that suffix exists only inside the image (`APP_VERSION`, also reported by
+`GET /api/health`). The release path pushes a commit, so the repo needs
+**Settings → Actions → General → Workflow permissions → Read and write**.
+
 ### The one storage rule
 
 **Fleetarr must see media at exactly the same container path the *Arr apps use.** Paths
@@ -78,6 +104,7 @@ Media itself is fine on `/mnt/user/data`.
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `APP_VERSION` | *(package.json)* | Reported by `GET /api/health`. Set at image build time; local runs read the repo-root `package.json`. |
 | `PORT` | `8585` | HTTP port |
 | `HOST` | `0.0.0.0` | Bind address |
 | `CONFIG_DIR` | `/config` | Database + key file location |

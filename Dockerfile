@@ -40,6 +40,11 @@ RUN npm ci --omit=dev --include-workspace-root -w @fleetarr/server -w @fleetarr/
 FROM base AS runtime
 RUN apk add --no-cache su-exec tzdata
 
+# Empty default: the process then reads the version from package.json. CI passes
+# a hashed or released value so /api/health matches the image tag.
+ARG APP_VERSION=
+ARG GIT_SHA=unknown
+
 ENV NODE_ENV=production \
     PORT=8585 \
     HOST=0.0.0.0 \
@@ -49,7 +54,14 @@ ENV NODE_ENV=production \
     PUID=99 \
     PGID=100 \
     UMASK=022 \
-    TZ=Etc/UTC
+    TZ=Etc/UTC \
+    APP_VERSION=${APP_VERSION}
+
+LABEL org.opencontainers.image.title="Fleetarr" \
+      org.opencontainers.image.description="Mass-editing for a fleet of Radarr and Sonarr instances" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${APP_VERSION}" \
+      org.opencontainers.image.revision="${GIT_SHA}"
 
 # node_modules contains symlinks to the workspaces, so the link targets have to
 # exist in the runtime image too - hence the shared package.json + dist below.

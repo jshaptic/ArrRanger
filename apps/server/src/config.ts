@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveSecret } from './lib/crypto.js';
@@ -96,6 +96,19 @@ function fromServerRoot(relative: string): string {
   return fileURLToPath(new URL(relative, import.meta.url));
 }
 
+/**
+ * Last cut release, from the repo-root package.json. CI overlays a hashed
+ * `APP_VERSION` (e.g. `0.1.0-dev.abc1234`) at image build time; that env wins.
+ */
+function readPackageVersion(): string {
+  const pkgPath = fromServerRoot('../../../package.json');
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { readonly version?: unknown };
+  if (typeof pkg.version !== 'string' || pkg.version.length === 0) {
+    throw new Error(`package.json at ${pkgPath} has no version`);
+  }
+  return pkg.version;
+}
+
 function envString(key: string): string | undefined {
   const value = process.env[key];
   return value === undefined || value.trim() === '' ? undefined : value.trim();
@@ -154,7 +167,7 @@ export function loadConfig(): AppConfig {
   mkdirSync(configDir, { recursive: true });
 
   const config: AppConfig = {
-    appVersion: envString('APP_VERSION') ?? '0.1.0',
+    appVersion: envString('APP_VERSION') ?? readPackageVersion(),
     host: envString('HOST') ?? '0.0.0.0',
     port: envInt('PORT', 8585),
     configDir,
