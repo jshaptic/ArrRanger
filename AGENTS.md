@@ -190,7 +190,7 @@ translation layer, one binding for the whole tree, so a rename stays atomic.
 
 ## Toolchain pitfalls
 
-- TypeScript is pinned `~5.9` (`vue-tsc` 3.x still resolves `typescript/lib/tsc`).
+- TypeScript is pinned `~6.0` (`vue-tsc` still resolves `typescript/lib/tsc`, which 7 does not export).
 - All build tooling lives in the root `package.json` - `--omit=dev` skips the root's
   devDependencies but not a workspace's, so those would ship in the runtime image.
 - Migrations toggle `PRAGMA foreign_keys` outside the transaction and run `foreign_key_check`
