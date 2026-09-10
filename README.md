@@ -6,6 +6,11 @@
 [![Vue.js](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fjshaptic%2FFleetarr%2Fmain%2Fapps%2Fweb%2Fpackage.json&query=%24.devDependencies.vue&label=Vue.js&logo=vue.js&logoColor=white&color=4FC08D)](https://vuejs.org/)
 [![AI-generated: primarily produced by an AI model](https://img.shields.io/static/v1?label=&message=AI-generated&color=red)](https://nasa-ammos.github.io/slim/?search=Badges)
 
+> [!CAUTION]
+> **Work in progress.** Fleetarr is unfinished and may change, break, or act on your
+> library incorrectly. Use it at your own risk. Do not point it at data you cannot
+> afford to lose.
+
 > [!WARNING]
 > **This project was vibe-coded.** That's OK. I don't see any problem with that, if it's used
 > wisely, properly tested by human and nothing critical depends on it.
