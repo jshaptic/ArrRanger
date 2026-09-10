@@ -1,5 +1,11 @@
 # Fleetarr
 
+[![License](https://img.shields.io/github/license/jshaptic/Fleetarr)](LICENSE)
+[![Release](https://img.shields.io/github/package-json/v/jshaptic/Fleetarr?label=release)](https://github.com/jshaptic/Fleetarr/releases)
+[![TypeScript](https://img.shields.io/github/package-json/dependency-version/jshaptic/Fleetarr/dev/typescript?logo=typescript&logoColor=white&label=TypeScript)](https://www.typescriptlang.org/)
+[![Vue.js](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fjshaptic%2FFleetarr%2Fmain%2Fapps%2Fweb%2Fpackage.json&query=%24.devDependencies.vue&label=Vue.js&logo=vue.js&logoColor=white&color=4FC08D)](https://vuejs.org/)
+[![AI-generated: primarily produced by an AI model](https://img.shields.io/static/v1?label=&message=AI-generated&color=red)](https://nasa-ammos.github.io/slim/?search=Badges)
+
 > [!WARNING]
 > **This project was vibe-coded.** That's OK. I don't see any problem with that, if it's used
 > wisely, properly tested by human and nothing critical depends on it.
@@ -54,20 +60,7 @@ docker pull ghcr.io/<github-owner>/fleetarr:latest   # released
 docker pull ghcr.io/<github-owner>/fleetarr:dev      # tip of main
 ```
 
-If the GitHub repo is private, the package is private too: `docker login ghcr.io` with a
-PAT that has `read:packages`. A public repo still ships a private package until you flip
-it to public on the package's GitHub page.
-
-Cut a release from **Actions → Docker → Run workflow** on `main`: `patch`, `minor` or
-`major` bumps every workspace `package.json` (they stay in lockstep), pushes a
-`release: x.y.z` commit, tags `vX.Y.Z`, and moves `latest`. `current` publishes whatever
-is already in `package.json` without bumping — that is how `0.1.0` first becomes
-`latest`. `dev` only rebuilds the hashed image. `package.json` is never given a hash —
-that suffix exists only inside the image (`APP_VERSION`, also reported by
-`GET /api/health`). The release path pushes a commit, so the repo needs
-**Settings → Actions → General → Workflow permissions → Read and write**.
-
-### The one storage rule
+## Storage
 
 **Fleetarr must see media at exactly the same container path the *Arr apps use.** Paths
 are compared literally; there is no translation layer. A mismatch is reported, never
@@ -100,6 +93,22 @@ recipe is possible: rename the folder on disk, then tell Radarr its new root wit
 SQLite in WAL mode on the FUSE layer is a known source of "database is locked" errors.
 Media itself is fine on `/mnt/user/data`.
 
+| | |
+|---|---|
+| Scope | Directories only. No file-level create, rename or delete. |
+| Traversal | Resolved against the configured roots; the parent chain is realpath'd so a symlink cannot escape. A symlink *leaf* is shown unresolved, never followed and never mutated. |
+| Deleting | Hard delete, no recycle bin. Non-empty needs `recursive`; a folder an instance still tracks - or one that cannot be checked - needs `force`. A storage root or mount point is refused. |
+| Cross-filesystem moves | **Refused.** Preflight compares device ids and reports how much would have to be copied. Move it with your own tool, then re-map. |
+| Preflight | Runs at stage time and again immediately before execution. A stale op fails with `fs_precondition_failed` instead of acting on an unreviewed disk. |
+
+The entrypoint reports writability of each storage root at boot (`docker logs`):
+
+```
+[fleetarr] storage root /data owner=99:100 mode=775 writable as 99:100
+[fleetarr] storage root /data owner=0:0 mode=755 NOT WRITABLE as 99:100
+[fleetarr]   fix: match PUID/PGID to the owner above, or give that group write access
+```
+
 ## Configuration
 
 | Variable | Default | Purpose |
@@ -120,24 +129,6 @@ Media itself is fine on `/mnt/user/data`.
 | `CORS_ORIGINS` | *(empty)* | Comma-separated origins; CORS stays off when empty |
 
 Healthcheck: `GET /api/health` on the container port.
-
-### What disk operations will and will not do
-
-| | |
-|---|---|
-| Scope | Directories only. No file-level create, rename or delete. |
-| Traversal | Resolved against the configured roots; the parent chain is realpath'd so a symlink cannot escape. A symlink *leaf* is shown unresolved, never followed and never mutated. |
-| Deleting | Hard delete, no recycle bin. Non-empty needs `recursive`; a folder an instance still tracks - or one that cannot be checked - needs `force`. A storage root or mount point is refused. |
-| Cross-filesystem moves | **Refused.** Preflight compares device ids and reports how much would have to be copied. Move it with your own tool, then re-map. |
-| Preflight | Runs at stage time and again immediately before execution. A stale op fails with `fs_precondition_failed` instead of acting on an unreviewed disk. |
-
-The entrypoint reports writability of each storage root at boot (`docker logs`):
-
-```
-[fleetarr] storage root /data owner=99:100 mode=775 writable as 99:100
-[fleetarr] storage root /data owner=0:0 mode=755 NOT WRITABLE as 99:100
-[fleetarr]   fix: match PUID/PGID to the owner above, or give that group write access
-```
 
 ## Development
 
